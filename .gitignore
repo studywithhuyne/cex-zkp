@@ -23,7 +23,3 @@ pgdata/
 
 # --- SECRETS ---
 .env
-
-# docs
-.github
-techstack.md
