@@ -1,0 +1,35 @@
+Phase,Task_ID,Task_Name,Description,Status
+1. Core Engine (Rust),ENG-01,Setup Cargo Workspace,"Tạo cargo workspace, config profile.release tối ưu tốc độ (lto = true, opt-level = 3)",TODO
+1. Core Engine (Rust),ENG-02,Structs: Order & Trade,"Định nghĩa Order (u64 id, u64 user_id, side, Decimal price, Decimal amount), Trade",TODO
+1. Core Engine (Rust),ENG-03,Struct: OrderBook,"Tạo BTreeMap cho Bids (Reverse order) & Asks, HashMap để map Order_ID -> Price (xóa cho nhanh)",TODO
+1. Core Engine (Rust),ENG-04,Logic: Add Order,"Thuật toán insert Order vào OrderBook, xử lý Price Level grouping",TODO
+1. Core Engine (Rust),ENG-05,Logic: Cancel Order,"Thuật toán tìm và xóa Order bằng HashMap lookup ở O(1), update BTreeMap",TODO
+1. Core Engine (Rust),ENG-06,Logic: Matching Core,"Vòng lặp FIFO Match. So sánh Taker Price với Maker Price. Cập nhật leftover amount",TODO
+1. Core Engine (Rust),ENG-07,Unit Tests: Matching,"Viết #[test] cho Full match, Partial match, Walking the book (Taker cắn nhiều Maker)",TODO
+1. Core Engine (Rust),ENG-08,Proptest: Fuzzing,"Dùng proptest sinh hàng ngàn lệnh random, assert tổng số dư tài sản (Base + Quote) không đổi",TODO
+1. Core Engine (Rust),ENG-09,Benchmark: Criterion,"Setup criterion, đo lường latency của hàm match_order. Mục tiêu: < 10 micro-seconds",TODO
+2. Database (Postgres),DB-01,Docker Compose DB,"Setup Postgres container, map port 5432, tạo init db script",TODO
+2. Database (Postgres),DB-02,Schema Migrations,"Viết file .sql tạo bảng: users, assets, balances, orders_log, trades_log",TODO
+2. Database (Postgres),DB-03,sqlx Connection Pool,"Setup PgPool trong Rust, config max connections",TODO
+2. Database (Postgres),DB-04,Async Background Worker,"Tạo tokio::sync::mpsc channel. Engine quăng Trade event vào channel, Worker flush vào DB ở background",TODO
+3. API Gateway (Axum),API-01,Axum Setup & State,"Khởi tạo Router, inject Arc<RwLock<Engine>> vào AppState",TODO
+3. API Gateway (Axum),API-02,Middleware: Auth,"Viết middleware parse HTTP header x-user-id thành u64, block request không hợp lệ",TODO
+3. API Gateway (Axum),API-03,REST: Order Endpoints,"Implement POST /api/orders (đặt lệnh), DELETE /api/orders/:id (hủy lệnh)",TODO
+3. API Gateway (Axum),API-04,REST: Data Endpoints,"Implement GET /api/orderbook (trả về top 50 depth), GET /api/balances",TODO
+3. API Gateway (Axum),API-05,WebSocket Broadcaster,"Dùng tokio::sync::broadcast. Bắn JSON update (OrderBook diff, Recent Trades) xuống clients",TODO
+4. ZKP Solvency,ZKP-01,Merkle Node Struct,"Định nghĩa Node chứa Hash và Decimal Balance. Khởi tạo mảng Leaves từ DB snapshots",TODO
+4. ZKP Solvency,ZKP-02,Poseidon Hash Logic,"Tích hợp Poseidon Hash từ arkworks/halo2 để băm (Left_Hash + Right_Hash + Left_Bal + Right_Bal)",TODO
+4. ZKP Solvency,ZKP-03,Merkle Tree Builder,"Thuật toán build cây từ dưới lên (Bottom-up). Tính Merkle Root",TODO
+4. ZKP Solvency,ZKP-04,ZK Circuit Design,"Định nghĩa ráng buộc (Constraints): Hash hợp lệ, Sum = Left + Right, không tràn số (Overflow)",TODO
+4. ZKP Solvency,ZKP-05,Prover API,"API GET /api/zkp/proof. Generate bằng chứng (Proof) và Merkle Path cho user đang request",TODO
+4. ZKP Solvency,ZKP-06,Wasm Verifier,"Tạo project wasm-pack. Viết hàm verify_proof nhận file .proof và public_inputs, trả về boolean",TODO
+5. Frontend (Svelte),UI-01,Vite SPA Init,"Khởi tạo project Vite + Svelte, setup TailwindCSS config, tạo layout Dark Mode",TODO
+5. Frontend (Svelte),UI-02,Store: WebSocket,"Tạo Svelte writable store kết nối Ws://, hứng data, update local OrderBook object",TODO
+5. Frontend (Svelte),UI-03,Component: OrderBook,"Vẽ UI Bids (chữ xanh) và Asks (chữ đỏ), render thanh Depth/Size background",TODO
+5. Frontend (Svelte),UI-04,Component: Trade Form,"Form Input Price, Amount. Nút Buy (màu xanh), Sell (màu đỏ). Gọi REST POST /api/orders",TODO
+5. Frontend (Svelte),UI-05,Component: User Header,"Dropdown chọn User ID giả lập (VD: Alice - ID 1, Bob - ID 2) để gán vào x-user-id header",TODO
+5. Frontend (Svelte),UI-06,Component: ZK Verifier,"Giao diện upload/fetch file proof. Gọi module Wasm (wasm-bindgen). Hiển thị kết quả Valid/Invalid",TODO
+6. DevOps & Infra,OPS-01,Backend Dockerfile,"Multi-stage build cho Rust: Builder image (compile) -> Alpine/Distroless image (run)",TODO
+6. DevOps & Infra,OPS-02,Frontend Dockerfile,"Build Svelte Vite ra thư mục dist/, copy vào Nginx alpine image",TODO
+6. DevOps & Infra,OPS-03,Nginx Config,"Viết nginx.conf: proxy_pass /api, proxy_pass /ws (upgrade headers), try_files cho file tĩnh",TODO
+6. DevOps & Infra,OPS-04,Full Docker Compose,"Gộp Postgres, Backend, Frontend vào mạng chung (docker network), test full luồng",TODO
