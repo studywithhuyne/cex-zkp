@@ -22,3 +22,4 @@ wasm-bindgen = "0.2"
 [dev-dependencies]
 # Property-based testing for the Merkle Sum Tree logic
 proptest = "1"
+rust_decimal_macros = "1"
