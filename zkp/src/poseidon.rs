@@ -31,7 +31,7 @@ impl core::fmt::Display for PoseidonError {
 impl std::error::Error for PoseidonError {}
 
 pub fn poseidon_leaf_hash(user_id: u64, balance: &Decimal) -> Result<HashBytes, PoseidonError> {
-    let mut sponge = PoseidonSponge::<Fr>::new(poseidon_params());
+    let mut sponge = PoseidonSponge::<Fr>::new(poseidon_parameters());
 
     sponge.absorb(&Fr::from(user_id));
     sponge.absorb(&decimal_to_field(balance)?);
@@ -45,7 +45,7 @@ pub fn poseidon_internal_hash(
     left_balance: &Decimal,
     right_balance: &Decimal,
 ) -> Result<HashBytes, PoseidonError> {
-    let mut sponge = PoseidonSponge::<Fr>::new(poseidon_params());
+    let mut sponge = PoseidonSponge::<Fr>::new(poseidon_parameters());
 
     sponge.absorb(&hash_to_field(left_hash));
     sponge.absorb(&hash_to_field(right_hash));
@@ -55,7 +55,7 @@ pub fn poseidon_internal_hash(
     Ok(field_to_hash_bytes(sponge.squeeze_field_elements(1)[0]))
 }
 
-fn poseidon_params() -> &'static PoseidonParameters<Fr> {
+pub(crate) fn poseidon_parameters() -> &'static PoseidonParameters<Fr> {
     static PARAMS: std::sync::OnceLock<PoseidonParameters<Fr>> = std::sync::OnceLock::new();
     PARAMS.get_or_init(build_poseidon_parameters)
 }

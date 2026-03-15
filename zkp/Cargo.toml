@@ -10,7 +10,9 @@ crate-type = ["cdylib", "rlib"]
 # ZK-friendly hash function (Poseidon Hash) - arkworks ecosystem
 ark-bn254 = "0.3"
 ark-ff = "0.3"
-ark-sponge = "0.3"
+ark-sponge = { version = "0.3", features = ["r1cs"] }
+ark-r1cs-std = "0.3"
+ark-relations = "0.3"
 
 # Financial math (consistent with core crate)
 rust_decimal = { version = "1", features = ["serde-float"] }
