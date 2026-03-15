@@ -17,12 +17,12 @@ Phase,Task_ID,Task_Name,Description,Status
 3. API Gateway (Axum),API-03,REST: Order Endpoints,"Implement POST /api/orders (đặt lệnh), DELETE /api/orders/:id (hủy lệnh)",TODO
 3. API Gateway (Axum),API-04,REST: Data Endpoints,"Implement GET /api/orderbook (trả về top 50 depth), GET /api/balances",TODO
 3. API Gateway (Axum),API-05,WebSocket Broadcaster,"Dùng tokio::sync::broadcast. Bắn JSON update (OrderBook diff, Recent Trades) xuống clients",TODO
-4. ZKP Solvency,ZKP-01,Merkle Node Struct,"Định nghĩa Node chứa Hash và Decimal Balance. Khởi tạo mảng Leaves từ DB snapshots",DONE
-4. ZKP Solvency,ZKP-02,Poseidon Hash Logic,"Tích hợp Poseidon Hash từ arkworks/halo2 để băm (Left_Hash + Right_Hash + Left_Bal + Right_Bal)",DONE
-4. ZKP Solvency,ZKP-03,Merkle Tree Builder,"Thuật toán build cây từ dưới lên (Bottom-up). Tính Merkle Root",DONE
-4. ZKP Solvency,ZKP-04,ZK Circuit Design,"Định nghĩa ráng buộc (Constraints): Hash hợp lệ, Sum = Left + Right, không tràn số (Overflow)",DONE
-4. ZKP Solvency,ZKP-05,Prover API,"API GET /api/zkp/proof. Generate bằng chứng (Proof) và Merkle Path cho user đang request",DONE
-4. ZKP Solvency,ZKP-06,Wasm Verifier,"Tạo project wasm-pack. Viết hàm verify_proof nhận file .proof và public_inputs, trả về boolean",DONE
+4. ZKP Solvency,ZKP-01,Merkle Node Struct,"Định nghĩa Node chứa Hash và Decimal Balance. Khởi tạo mảng Leaves từ DB snapshots",TODO
+4. ZKP Solvency,ZKP-02,Poseidon Hash Logic,"Tích hợp Poseidon Hash từ arkworks/halo2 để băm (Left_Hash + Right_Hash + Left_Bal + Right_Bal)",TODO
+4. ZKP Solvency,ZKP-03,Merkle Tree Builder,"Thuật toán build cây từ dưới lên (Bottom-up). Tính Merkle Root",TODO
+4. ZKP Solvency,ZKP-04,ZK Circuit Design,"Định nghĩa ráng buộc (Constraints): Hash hợp lệ, Sum = Left + Right, không tràn số (Overflow)",TODO
+4. ZKP Solvency,ZKP-05,Prover API,"API GET /api/zkp/proof. Generate bằng chứng (Proof) và Merkle Path cho user đang request",TODO
+4. ZKP Solvency,ZKP-06,Wasm Verifier,"Tạo project wasm-pack. Viết hàm verify_proof nhận file .proof và public_inputs, trả về boolean",TODO
 5. Frontend (Svelte),UI-01,Vite SPA Init,"Khởi tạo project Vite + Svelte, setup TailwindCSS config, tạo layout Dark Mode",TODO
 5. Frontend (Svelte),UI-02,Store: WebSocket,"Tạo Svelte writable store kết nối Ws://, hứng data, update local OrderBook object",TODO
 5. Frontend (Svelte),UI-03,Component: OrderBook,"Vẽ UI Bids (chữ xanh) và Asks (chữ đỏ), render thanh Depth/Size background",TODO
