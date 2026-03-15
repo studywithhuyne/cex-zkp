@@ -55,6 +55,9 @@ dotenvy = "0.15"
 # High-performance RwLock
 parking_lot = "0.12"
 
+# Internal ZKP crate (Merkle tree + circuit primitives)
+zkp = { path = "../zkp" }
+
 [dev-dependencies]
 # Property-based testing (fuzzing)
 proptest = "1"
