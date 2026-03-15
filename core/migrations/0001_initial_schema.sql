@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS balances (
 -- ──────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS orders_log (
-    id          UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
     order_id    BIGINT        NOT NULL UNIQUE,    -- matches Order.id in engine
     user_id     BIGINT        NOT NULL REFERENCES users(id),
     side        order_side    NOT NULL,
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS orders_log (
 -- ──────────────────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS trades_log (
-    id             UUID          PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id             UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
     maker_order_id BIGINT        NOT NULL REFERENCES orders_log(order_id),
     taker_order_id BIGINT        NOT NULL REFERENCES orders_log(order_id),
     maker_user_id  BIGINT        NOT NULL REFERENCES users(id),

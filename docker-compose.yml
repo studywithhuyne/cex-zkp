@@ -1,5 +1,4 @@
 # docker-compose.yml
-version: '3.8'
 
 services:
   db:
@@ -24,6 +23,36 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - cex_net
+
+  backend:
+    build:
+      context: .
+      dockerfile: core/Dockerfile
+    container_name: cex_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgres://admin:admin@db:5432/cex_db
+      RUST_LOG: info
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    networks:
+      - cex_net
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: cex_web
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
     networks:
       - cex_net
 

@@ -25,8 +25,8 @@ use serde_json::{json, Value};
 /// The authenticated caller's user ID, extracted from the `x-user-id` header.
 ///
 /// Usage — add as a handler parameter:
-/// ```rust
-/// async fn my_handler(UserId(uid): UserId, ...) { ... }
+/// ```rust,ignore
+/// async fn my_handler(UserId(uid): UserId, ...) { /* ... */ }
 /// ```
 /// Axum will reject the request with 401/400 if the header is absent or invalid.
 #[derive(Debug, Clone, Copy)]
