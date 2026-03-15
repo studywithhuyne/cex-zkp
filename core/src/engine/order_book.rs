@@ -6,6 +6,9 @@ use rust_decimal::Decimal;
 use super::error::EngineError;
 use super::types::{Order, Side, Trade};
 
+pub type DepthLevel = (Decimal, Decimal);
+pub type DepthSnapshot = (Vec<DepthLevel>, Vec<DepthLevel>);
+
 /// Central limit order book.
 ///
 /// Layout
@@ -60,7 +63,7 @@ impl OrderBook {
     /// Bids are returned highest-price-first; asks lowest-price-first.
     /// `total_remaining` is the sum of `remaining` across all orders at that level.
     /// Used by the API layer to serve the /api/orderbook depth snapshot.
-    pub fn depth_snapshot(&self, limit: usize) -> (Vec<(Decimal, Decimal)>, Vec<(Decimal, Decimal)>) {
+    pub fn depth_snapshot(&self, limit: usize) -> DepthSnapshot {
         let bids = self
             .bids
             .iter()
