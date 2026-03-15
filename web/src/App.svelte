@@ -1,38 +1,40 @@
-<main>
-  <h1>Matching Engine Gateway</h1>
-  <p>Nginx is serving this SPA and proxying <code>/api</code> + <code>/ws</code> to the Rust backend.</p>
-  <ul>
-    <li><a href="/health" target="_blank" rel="noreferrer">GET /health</a></li>
-    <li><a href="/api/orderbook" target="_blank" rel="noreferrer">GET /api/orderbook</a></li>
-  </ul>
+<script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import { orderBook } from "./stores/orderBookStore.js";
+  import TopBar from "./components/layout/TopBar.svelte";
+  import UserHeader from "./components/user/UserHeader.svelte";
+  import OrderBookPanel from "./components/orderbook/OrderBookPanel.svelte";
+  import TradeFormPanel from "./components/trade/TradeFormPanel.svelte";
+  import ZkpVerifierPanel from "./components/zkp/ZkpVerifierPanel.svelte";
+
+  onMount(() => {
+    orderBook.connect();
+  });
+
+  onDestroy(() => {
+    orderBook.disconnect();
+  });
+</script>
+
+<main class="terminal-shell">
+  <TopBar />
+
+  <div class="mt-4 md:mt-6">
+    <UserHeader />
+  </div>
+
+  <div class="mt-4 grid gap-4 lg:grid-cols-[1.45fr_1fr] lg:items-start md:mt-6 md:gap-6">
+    <OrderBookPanel />
+
+    <div class="space-y-4 md:space-y-6">
+      <TradeFormPanel />
+      <ZkpVerifierPanel />
+    </div>
+  </div>
+
+  <footer class="mt-5 flex flex-wrap items-center gap-2 text-xs text-slate-400 md:mt-7">
+    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">Nginx SPA</span>
+    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">/api proxied</span>
+    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">/ws ready</span>
+  </footer>
 </main>
-
-<style>
-  :global(body) {
-    margin: 0;
-    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
-  }
-
-  main {
-    max-width: 720px;
-    margin: 48px auto;
-    padding: 24px;
-    background: #1e293b;
-    border-radius: 12px;
-  }
-
-  h1 {
-    margin-top: 0;
-  }
-
-  a {
-    color: #38bdf8;
-    text-decoration: none;
-  }
-
-  a:hover {
-    text-decoration: underline;
-  }
-</style>
