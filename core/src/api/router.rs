@@ -16,7 +16,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use super::{orders, state::AppState};
+use super::{data, orders, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -30,9 +30,9 @@ pub fn build_router(state: AppState) -> Router {
         // API-03: order management
         .route("/api/orders",     post(orders::place_order))
         .route("/api/orders/:id", delete(orders::cancel_order))
-        // API-04 routes are mounted here in later tasks:
-        //   .route("/api/orderbook", get(data::orderbook_handler))
-        //   .route("/api/balances",  get(data::balances_handler))
+        // API-04: market data and user balances
+        .route("/api/orderbook", get(data::orderbook_handler))
+        .route("/api/balances",  get(data::balances_handler))
         // API-05:
         //   .route("/ws", get(ws::handler))
         .with_state(state)

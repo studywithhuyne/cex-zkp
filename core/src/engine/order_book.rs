@@ -55,6 +55,35 @@ impl OrderBook {
         self.order_map.is_empty()
     }
 
+    /// Return the top-`limit` price levels on each side as (price, total_remaining) pairs.
+    ///
+    /// Bids are returned highest-price-first; asks lowest-price-first.
+    /// `total_remaining` is the sum of `remaining` across all orders at that level.
+    /// Used by the API layer to serve the /api/orderbook depth snapshot.
+    pub fn depth_snapshot(&self, limit: usize) -> (Vec<(Decimal, Decimal)>, Vec<(Decimal, Decimal)>) {
+        let bids = self
+            .bids
+            .iter()
+            .take(limit)
+            .map(|(Reverse(price), queue)| {
+                let total: Decimal = queue.iter().map(|o| o.remaining).sum();
+                (*price, total)
+            })
+            .collect();
+
+        let asks = self
+            .asks
+            .iter()
+            .take(limit)
+            .map(|(price, queue)| {
+                let total: Decimal = queue.iter().map(|o| o.remaining).sum();
+                (*price, total)
+            })
+            .collect();
+
+        (bids, asks)
+    }
+
     /// Insert a limit order into the book **without** attempting to match it.
     ///
     /// Use this to place a resting (passive) order directly. For incoming
