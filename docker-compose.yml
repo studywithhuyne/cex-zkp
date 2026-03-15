@@ -3,7 +3,7 @@ version: '3.8'
 
 services:
   db:
-    # Upgrade to PostgreSQL 17 (Latest Stable) with lightweight Alpine Linux
+    # PostgreSQL 17 (Latest Stable) with lightweight Alpine Linux
     image: postgres:17-alpine
     container_name: cex_postgres
     restart: always
@@ -11,10 +11,25 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: cex_db
+      PGTZ: UTC
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Init scripts run once on first container start (alphabetical order)
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d cex_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - cex_net
+
+networks:
+  cex_net:
+    driver: bridge
 
 volumes:
   pgdata:

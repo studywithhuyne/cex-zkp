@@ -39,8 +39,9 @@ pgdata/
 /zkp/pkg/
 *.wasm
 
-# env variants
+# env variants (keep .env.example tracked as a reference template)
 .env.*
+!.env.example
 
 # coverage / profiler
 coverage/
@@ -49,3 +50,6 @@ coverage/
 
 # cache
 .cache/
+
+#local testing
+dummy_feed.rs
