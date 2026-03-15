@@ -8,10 +8,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # ZK-friendly hash function (Poseidon Hash) - arkworks ecosystem
-# Note: specific arkworks crates will be added in ZKP-02 after verifying exact APIs
+ark-bn254 = "0.3"
+ark-ff = "0.3"
+ark-sponge = "0.3"
 
 # Financial math (consistent with core crate)
 rust_decimal = { version = "1", features = ["serde-float"] }
+num-traits = "0.2"
+rand = "0.8"
 
 # Serialization for proof data
 serde = { version = "1", features = ["derive"] }

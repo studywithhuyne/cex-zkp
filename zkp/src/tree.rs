@@ -1,5 +1,7 @@
 use rust_decimal::Decimal;
 
+use crate::poseidon::{poseidon_leaf_hash, PoseidonError};
+
 pub const HASH_BYTES: usize = 32;
 pub type HashBytes = [u8; HASH_BYTES];
 
@@ -28,6 +30,7 @@ pub enum TreeError {
 	InvalidUserId(i64),
 	NegativeBalance { user_id: u64, balance: Decimal },
 	BalanceOverflow { user_id: u64 },
+	HashingError(PoseidonError),
 }
 
 impl core::fmt::Display for TreeError {
@@ -41,11 +44,18 @@ impl core::fmt::Display for TreeError {
 			Self::BalanceOverflow { user_id } => {
 				write!(f, "balance overflow while aggregating snapshot for user {user_id}")
 			}
+			Self::HashingError(err) => write!(f, "poseidon hashing failed: {err}"),
 		}
 	}
 }
 
 impl std::error::Error for TreeError {}
+
+impl From<PoseidonError> for TreeError {
+	fn from(value: PoseidonError) -> Self {
+		Self::HashingError(value)
+	}
+}
 
 pub fn build_leaf_nodes<F>(
 	snapshots: &[BalanceSnapshot],
@@ -83,6 +93,42 @@ pub fn build_leaf_nodes_from_db_snapshots<F>(
 where
 	F: FnMut(u64, &Decimal) -> HashBytes,
 {
+	let normalized = normalize_db_snapshots(db_snapshots)?;
+	build_leaf_nodes(&normalized, leaf_hasher)
+}
+
+pub fn build_poseidon_leaf_nodes(snapshots: &[BalanceSnapshot]) -> Result<Vec<MerkleNode>, TreeError> {
+	if snapshots.is_empty() {
+		return Err(TreeError::EmptySnapshotInput);
+	}
+
+	let mut leaves = Vec::with_capacity(snapshots.len());
+	for snapshot in snapshots {
+		if snapshot.balance.is_sign_negative() {
+			return Err(TreeError::NegativeBalance {
+				user_id: snapshot.user_id,
+				balance: snapshot.balance,
+			});
+		}
+
+		let hash = poseidon_leaf_hash(snapshot.user_id, &snapshot.balance)?;
+		leaves.push(MerkleNode {
+			hash,
+			balance: snapshot.balance,
+		});
+	}
+
+	Ok(leaves)
+}
+
+pub fn build_poseidon_leaf_nodes_from_db_snapshots(
+	db_snapshots: &[DbBalanceSnapshot],
+) -> Result<Vec<MerkleNode>, TreeError> {
+	let normalized = normalize_db_snapshots(db_snapshots)?;
+	build_poseidon_leaf_nodes(&normalized)
+}
+
+fn normalize_db_snapshots(db_snapshots: &[DbBalanceSnapshot]) -> Result<Vec<BalanceSnapshot>, TreeError> {
 	if db_snapshots.is_empty() {
 		return Err(TreeError::EmptySnapshotInput);
 	}
@@ -102,12 +148,15 @@ where
 		normalized.push(BalanceSnapshot { user_id, balance });
 	}
 
-	build_leaf_nodes(&normalized, leaf_hasher)
+	Ok(normalized)
 }
 
 #[cfg(test)]
 mod tests {
-	use super::{build_leaf_nodes, build_leaf_nodes_from_db_snapshots, BalanceSnapshot, DbBalanceSnapshot, TreeError};
+	use super::{
+		build_leaf_nodes, build_leaf_nodes_from_db_snapshots, build_poseidon_leaf_nodes,
+		BalanceSnapshot, DbBalanceSnapshot, TreeError,
+	};
 	use rust_decimal::Decimal;
 	use rust_decimal_macros::dec;
 
@@ -198,5 +247,23 @@ mod tests {
 		let err =
 			build_leaf_nodes_from_db_snapshots(&db_snapshots, deterministic_hash).expect_err("invalid user id must fail");
 		assert_eq!(err, TreeError::InvalidUserId(-1));
+	}
+
+	#[test]
+	fn build_poseidon_leaf_nodes_successfully() {
+		let snapshots = vec![
+			BalanceSnapshot {
+				user_id: 11,
+				balance: dec!(100.01),
+			},
+			BalanceSnapshot {
+				user_id: 12,
+				balance: dec!(99.99),
+			},
+		];
+
+		let leaves = build_poseidon_leaf_nodes(&snapshots).expect("poseidon leaf build must succeed");
+		assert_eq!(leaves.len(), 2);
+		assert_ne!(leaves[0].hash, leaves[1].hash);
 	}
 }
