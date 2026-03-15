@@ -8,13 +8,21 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # ZK-friendly hash function (Poseidon Hash) - arkworks ecosystem
-# Note: specific arkworks crates will be added in ZKP-02 after verifying exact APIs
+ark-bn254 = "0.3"
+ark-ff = "0.3"
+ark-sponge = { version = "0.3", features = ["r1cs"] }
+ark-r1cs-std = "0.3"
+ark-relations = "0.3"
 
 # Financial math (consistent with core crate)
 rust_decimal = { version = "1", features = ["serde-float"] }
+num-traits = "0.2"
+rand = "0.8"
+getrandom = { version = "0.2", features = ["js"] }
 
 # Serialization for proof data
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # Wasm bindings - compiled by wasm-pack for client-side verification
 wasm-bindgen = "0.2"
@@ -22,3 +30,4 @@ wasm-bindgen = "0.2"
 [dev-dependencies]
 # Property-based testing for the Merkle Sum Tree logic
 proptest = "1"
+rust_decimal_macros = "1"
