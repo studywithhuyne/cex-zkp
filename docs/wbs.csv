@@ -2,7 +2,7 @@ Phase,Task_ID,Task_Name,Description,Status
 1. Core Engine (Rust),ENG-01,Setup Cargo Workspace,"Tạo cargo workspace, config profile.release tối ưu tốc độ (lto = true, opt-level = 3)",DONE
 1. Core Engine (Rust),ENG-02,Structs: Order & Trade,"Định nghĩa Order (u64 id, u64 user_id, side, Decimal price, Decimal amount), Trade",DONE
 1. Core Engine (Rust),ENG-03,Struct: OrderBook,"Tạo BTreeMap cho Bids (Reverse order) & Asks, HashMap để map Order_ID -> Price (xóa cho nhanh)",DONE
-1. Core Engine (Rust),ENG-04,Logic: Add Order,"Thuật toán insert Order vào OrderBook, xử lý Price Level grouping",TODO
+1. Core Engine (Rust),ENG-04,Logic: Add Order,"Thuật toán insert Order vào OrderBook, xử lý Price Level grouping",DONE
 1. Core Engine (Rust),ENG-05,Logic: Cancel Order,"Thuật toán tìm và xóa Order bằng HashMap lookup ở O(1), update BTreeMap",TODO
 1. Core Engine (Rust),ENG-06,Logic: Matching Core,"Vòng lặp FIFO Match. So sánh Taker Price với Maker Price. Cập nhật leftover amount",TODO
 1. Core Engine (Rust),ENG-07,Unit Tests: Matching,"Viết #[test] cho Full match, Partial match, Walking the book (Taker cắn nhiều Maker)",TODO
