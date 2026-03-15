@@ -46,6 +46,9 @@ sqlx = { version = "0.7", features = [
 # UUID for ID generation
 uuid = { version = "1", features = ["v4"] }
 
+# Timestamps (required by sqlx chrono feature)
+chrono = { version = "0.4", features = ["serde"] }
+
 # Environment variables
 dotenvy = "0.15"
 
