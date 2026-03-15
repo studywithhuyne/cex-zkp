@@ -4,7 +4,7 @@ Phase,Task_ID,Task_Name,Description,Status
 1. Core Engine (Rust),ENG-03,Struct: OrderBook,"Tạo BTreeMap cho Bids (Reverse order) & Asks, HashMap để map Order_ID -> Price (xóa cho nhanh)",DONE
 1. Core Engine (Rust),ENG-04,Logic: Add Order,"Thuật toán insert Order vào OrderBook, xử lý Price Level grouping",DONE
 1. Core Engine (Rust),ENG-05,Logic: Cancel Order,"Thuật toán tìm và xóa Order bằng HashMap lookup ở O(1), update BTreeMap",DONE
-1. Core Engine (Rust),ENG-06,Logic: Matching Core,"Vòng lặp FIFO Match. So sánh Taker Price với Maker Price. Cập nhật leftover amount",TODO
+1. Core Engine (Rust),ENG-06,Logic: Matching Core,"Vòng lặp FIFO Match. So sánh Taker Price với Maker Price. Cập nhật leftover amount",DONE
 1. Core Engine (Rust),ENG-07,Unit Tests: Matching,"Viết #[test] cho Full match, Partial match, Walking the book (Taker cắn nhiều Maker)",TODO
 1. Core Engine (Rust),ENG-08,Proptest: Fuzzing,"Dùng proptest sinh hàng ngàn lệnh random, assert tổng số dư tài sản (Base + Quote) không đổi",TODO
 1. Core Engine (Rust),ENG-09,Benchmark: Criterion,"Setup criterion, đo lường latency của hàm match_order. Mục tiêu: < 10 micro-seconds",TODO

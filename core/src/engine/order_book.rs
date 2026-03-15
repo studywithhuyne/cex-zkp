@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use rust_decimal::Decimal;
 
 use super::error::EngineError;
-use super::types::{Order, Side};
+use super::types::{Order, Side, Trade};
 
 /// Central limit order book.
 ///
@@ -55,7 +55,10 @@ impl OrderBook {
         self.order_map.is_empty()
     }
 
-    /// Insert a limit order into the book.
+    /// Insert a limit order into the book **without** attempting to match it.
+    ///
+    /// Use this to place a resting (passive) order directly. For incoming
+    /// aggressive orders that should match first, use `match_order`.
     ///
     /// Algorithm
     /// ─────────
@@ -142,6 +145,146 @@ impl OrderBook {
         cancelled.ok_or(EngineError::OrderNotFound(order_id))
     }
 
+    /// Match an incoming taker order against resting orders in the book.
+    ///
+    /// Algorithm
+    /// ─────────
+    /// 1. Validate price > 0 and amount > 0.
+    /// 2. Reject duplicate order IDs (taker must not already be in the book).
+    /// 3. Loop — find the best opposite-side price level that crosses the taker:
+    ///    - Buy  taker: best ask must be ≤ taker.price
+    ///    - Sell taker: best bid must be ≥ taker.price
+    /// 4. Take the front order at that level (FIFO priority within the level).
+    /// 5. fill_qty = min(taker.remaining, maker.remaining)
+    /// 6. Emit a Trade at the maker's limit price (price-time priority).
+    /// 7. Decrement remaining on both sides.
+    /// 8. If maker is fully filled → pop from queue, remove price level if
+    ///    empty, remove from order_map.
+    /// 9. Repeat until taker is filled or no crossing price level remains.
+    /// 10. If taker still has remaining quantity → place it as a resting order.
+    ///
+    /// Returns the list of Trades generated (empty if no price crossing exists).
+    pub fn match_order(&mut self, taker: Order) -> Result<Vec<Trade>, EngineError> {
+        // --- Validation ---
+        if taker.price <= Decimal::ZERO {
+            return Err(EngineError::InvalidPrice(taker.price));
+        }
+        if taker.amount <= Decimal::ZERO {
+            return Err(EngineError::InvalidAmount(taker.amount));
+        }
+        if self.order_map.contains_key(&taker.id) {
+            return Err(EngineError::DuplicateOrderId(taker.id));
+        }
+
+        let mut taker = taker;
+        let mut trades = Vec::new();
+
+        match taker.side {
+            Side::Buy => self.fill_buy(&mut taker, &mut trades),
+            Side::Sell => self.fill_sell(&mut taker, &mut trades),
+        }
+
+        // Taker still has remaining quantity → becomes a resting limit order.
+        if !taker.is_filled() {
+            let price = taker.price;
+            let id = taker.id;
+            let side = taker.side;
+            match side {
+                Side::Buy => self.bids.entry(Reverse(price)).or_default().push_back(taker),
+                Side::Sell => self.asks.entry(price).or_default().push_back(taker),
+            }
+            self.order_map.insert(id, (side, price));
+        }
+
+        Ok(trades)
+    }
+
+    // ── Private matching helpers ────────────────────────────────────────────
+
+    /// Inner loop for a Buy taker: consume resting asks from lowest to highest.
+    fn fill_buy(&mut self, taker: &mut Order, trades: &mut Vec<Trade>) {
+        loop {
+            // Best ask must be ≤ taker price for a price crossing.
+            let best_ask = match self.asks.keys().next().copied() {
+                Some(p) if p <= taker.price => p,
+                _ => break,
+            };
+
+            // Inner scope so the mutable borrow of `self.asks` is released
+            // before we potentially remove the price level below.
+            let (fill_qty, maker_id, maker_filled) = {
+                let queue = self.asks.get_mut(&best_ask).unwrap();
+                let maker = queue.front_mut().unwrap();
+                let fill_qty = taker.remaining.min(maker.remaining);
+                maker.remaining -= fill_qty;
+                taker.remaining -= fill_qty;
+                (fill_qty, maker.id, maker.is_filled())
+            };
+
+            trades.push(Trade {
+                maker_order_id: maker_id,
+                taker_order_id: taker.id,
+                price: best_ask, // execution at the maker's (ask) price
+                amount: fill_qty,
+            });
+
+            if maker_filled {
+                let queue = self.asks.get_mut(&best_ask).unwrap();
+                queue.pop_front();
+                if queue.is_empty() {
+                    self.asks.remove(&best_ask);
+                }
+                self.order_map.remove(&maker_id);
+            }
+
+            if taker.is_filled() {
+                break;
+            }
+        }
+    }
+
+    /// Inner loop for a Sell taker: consume resting bids from highest to lowest.
+    fn fill_sell(&mut self, taker: &mut Order, trades: &mut Vec<Trade>) {
+        loop {
+            // Best bid must be ≥ taker price for a price crossing.
+            let best_bid = match self.bids.keys().next().map(|Reverse(p)| *p) {
+                Some(p) if p >= taker.price => p,
+                _ => break,
+            };
+
+            // Inner scope so the mutable borrow of `self.bids` is released
+            // before we potentially remove the price level below.
+            let (fill_qty, maker_id, maker_filled) = {
+                let queue = self.bids.get_mut(&Reverse(best_bid)).unwrap();
+                let maker = queue.front_mut().unwrap();
+                let fill_qty = taker.remaining.min(maker.remaining);
+                maker.remaining -= fill_qty;
+                taker.remaining -= fill_qty;
+                (fill_qty, maker.id, maker.is_filled())
+            };
+
+            trades.push(Trade {
+                maker_order_id: maker_id,
+                taker_order_id: taker.id,
+                price: best_bid, // execution at the maker's (bid) price
+                amount: fill_qty,
+            });
+
+            if maker_filled {
+                let queue = self.bids.get_mut(&Reverse(best_bid)).unwrap();
+                queue.pop_front();
+                if queue.is_empty() {
+                    self.bids.remove(&Reverse(best_bid));
+                }
+                self.order_map.remove(&maker_id);
+            }
+
+            if taker.is_filled() {
+                break;
+            }
+        }
+    }
+
     /// Generic helper: remove `order_id` from the VecDeque at `key` in `map`.
     /// Drops the price level entry if the queue becomes empty.
     fn remove_from_level<K>(
@@ -187,13 +330,12 @@ mod tests {
         Order::new(id, 2, Side::Sell, price, amount)
     }
 
-    // ─── add_order: happy paths ───────────────────────────────────────────
+    // ─── add_order ────────────────────────────────────────────────────────
 
     #[test]
     fn buy_order_appears_in_bids() {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(10))).unwrap();
-
         assert_eq!(book.len(), 1);
         assert_eq!(book.best_bid(), Some(dec!(100)));
         assert!(book.best_ask().is_none());
@@ -203,7 +345,6 @@ mod tests {
     fn sell_order_appears_in_asks() {
         let mut book = OrderBook::new();
         book.add_order(sell(1, dec!(101), dec!(10))).unwrap();
-
         assert_eq!(book.len(), 1);
         assert_eq!(book.best_ask(), Some(dec!(101)));
         assert!(book.best_bid().is_none());
@@ -215,7 +356,6 @@ mod tests {
         book.add_order(buy(1, dec!(99), dec!(1))).unwrap();
         book.add_order(buy(2, dec!(101), dec!(1))).unwrap();
         book.add_order(buy(3, dec!(100), dec!(1))).unwrap();
-
         assert_eq!(book.best_bid(), Some(dec!(101)));
     }
 
@@ -225,7 +365,6 @@ mod tests {
         book.add_order(sell(1, dec!(102), dec!(1))).unwrap();
         book.add_order(sell(2, dec!(100), dec!(1))).unwrap();
         book.add_order(sell(3, dec!(101), dec!(1))).unwrap();
-
         assert_eq!(book.best_ask(), Some(dec!(100)));
     }
 
@@ -234,14 +373,11 @@ mod tests {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(5))).unwrap();
         book.add_order(buy(2, dec!(100), dec!(3))).unwrap();
-
         let queue = book.bids.get(&Reverse(dec!(100))).unwrap();
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.front().unwrap().id, 1);
         assert_eq!(queue.back().unwrap().id, 2);
     }
-
-    // ─── add_order: error paths ───────────────────────────────────────────
 
     #[test]
     fn duplicate_order_id_is_rejected() {
@@ -272,13 +408,12 @@ mod tests {
         assert_eq!(err, EngineError::InvalidAmount(dec!(0)));
     }
 
-    // ─── cancel_order: happy paths ────────────────────────────────────────
+    // ─── cancel_order ─────────────────────────────────────────────────────
 
     #[test]
     fn cancel_buy_order_removes_from_bids() {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(10))).unwrap();
-
         let cancelled = book.cancel_order(1).unwrap();
         assert_eq!(cancelled.id, 1);
         assert_eq!(book.len(), 0);
@@ -289,7 +424,6 @@ mod tests {
     fn cancel_sell_order_removes_from_asks() {
         let mut book = OrderBook::new();
         book.add_order(sell(1, dec!(101), dec!(5))).unwrap();
-
         let cancelled = book.cancel_order(1).unwrap();
         assert_eq!(cancelled.id, 1);
         assert_eq!(book.len(), 0);
@@ -301,8 +435,6 @@ mod tests {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(1))).unwrap();
         book.cancel_order(1).unwrap();
-
-        // Price level must be cleaned up so best_bid reflects reality
         assert!(book.bids.is_empty());
         assert!(book.best_bid().is_none());
     }
@@ -313,10 +445,7 @@ mod tests {
         book.add_order(buy(1, dec!(100), dec!(1))).unwrap();
         book.add_order(buy(2, dec!(100), dec!(2))).unwrap();
         book.add_order(buy(3, dec!(100), dec!(3))).unwrap();
-
-        // Cancel the middle order
         book.cancel_order(2).unwrap();
-
         let queue = book.bids.get(&Reverse(dec!(100))).unwrap();
         assert_eq!(queue.len(), 2);
         assert_eq!(queue.front().unwrap().id, 1);
@@ -329,12 +458,9 @@ mod tests {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(101), dec!(1))).unwrap();
         book.add_order(buy(2, dec!(100), dec!(1))).unwrap();
-
-        book.cancel_order(1).unwrap(); // remove the best bid
+        book.cancel_order(1).unwrap();
         assert_eq!(book.best_bid(), Some(dec!(100)));
     }
-
-    // ─── cancel_order: error paths ────────────────────────────────────────
 
     #[test]
     fn cancel_nonexistent_order_returns_error() {
@@ -348,8 +474,164 @@ mod tests {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(1))).unwrap();
         book.cancel_order(1).unwrap();
-
         let err = book.cancel_order(1).unwrap_err();
         assert_eq!(err, EngineError::OrderNotFound(1));
+    }
+
+    // ─── match_order: no crossing ─────────────────────────────────────────
+
+    #[test]
+    fn no_crossing_buy_rests_on_book() {
+        let mut book = OrderBook::new();
+        // Sell at 101, buy at 100 → no crossing
+        book.add_order(sell(1, dec!(101), dec!(10))).unwrap();
+        let trades = book.match_order(buy(2, dec!(100), dec!(5))).unwrap();
+
+        assert!(trades.is_empty());
+        // Taker rests as a bid at 100
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_bid(), Some(dec!(100)));
+    }
+
+    #[test]
+    fn no_crossing_sell_rests_on_book() {
+        let mut book = OrderBook::new();
+        // Buy at 99, sell at 100 → no crossing
+        book.add_order(buy(1, dec!(99), dec!(10))).unwrap();
+        let trades = book.match_order(sell(2, dec!(100), dec!(5))).unwrap();
+
+        assert!(trades.is_empty());
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_ask(), Some(dec!(100)));
+    }
+
+    // ─── match_order: full fill ───────────────────────────────────────────
+
+    #[test]
+    fn full_fill_buy_taker_consumes_ask() {
+        // Resting sell 10 @ 100. Taker buys 10 @ 100 → 1 trade, book empty.
+        let mut book = OrderBook::new();
+        book.add_order(sell(1, dec!(100), dec!(10))).unwrap();
+
+        let trades = book.match_order(buy(2, dec!(100), dec!(10))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].price, dec!(100));
+        assert_eq!(trades[0].amount, dec!(10));
+        assert_eq!(trades[0].maker_order_id, 1);
+        assert_eq!(trades[0].taker_order_id, 2);
+        assert!(book.is_empty());
+    }
+
+    #[test]
+    fn full_fill_sell_taker_consumes_bid() {
+        // Resting buy 5 @ 101. Taker sells 5 @ 101 → 1 trade, book empty.
+        let mut book = OrderBook::new();
+        book.add_order(buy(1, dec!(101), dec!(5))).unwrap();
+
+        let trades = book.match_order(sell(2, dec!(101), dec!(5))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].price, dec!(101));
+        assert_eq!(trades[0].amount, dec!(5));
+        assert!(book.is_empty());
+    }
+
+    // ─── match_order: partial fill ────────────────────────────────────────
+
+    #[test]
+    fn partial_fill_taker_larger_than_maker() {
+        // Maker sells 3 @ 100. Taker buys 10 → 1 trade of 3, taker rests with 7.
+        let mut book = OrderBook::new();
+        book.add_order(sell(1, dec!(100), dec!(3))).unwrap();
+
+        let trades = book.match_order(buy(2, dec!(100), dec!(10))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].amount, dec!(3));
+        // Taker rests on bids with 7 remaining
+        assert_eq!(book.len(), 1);
+        assert_eq!(book.best_bid(), Some(dec!(100)));
+        assert!(book.best_ask().is_none());
+    }
+
+    #[test]
+    fn partial_fill_maker_larger_than_taker() {
+        // Maker sells 10 @ 100. Taker buys 3 → 1 trade of 3, maker still resting with 7.
+        let mut book = OrderBook::new();
+        book.add_order(sell(1, dec!(100), dec!(10))).unwrap();
+
+        let trades = book.match_order(buy(2, dec!(100), dec!(3))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].amount, dec!(3));
+        // Maker still alive with 7 remaining
+        assert_eq!(book.len(), 1);
+        assert_eq!(book.best_ask(), Some(dec!(100)));
+        let queue = book.asks.get(&dec!(100)).unwrap();
+        assert_eq!(queue.front().unwrap().remaining, dec!(7));
+    }
+
+    // ─── match_order: walking the book ────────────────────────────────────
+
+    #[test]
+    fn buy_taker_walks_multiple_ask_levels() {
+        // Asks: 5 @ 100, 5 @ 101, 5 @ 102
+        // Taker buys 12 @ 102 → consumes level 100 (5), level 101 (5), 2 from 102.
+        let mut book = OrderBook::new();
+        book.add_order(sell(1, dec!(100), dec!(5))).unwrap();
+        book.add_order(sell(2, dec!(101), dec!(5))).unwrap();
+        book.add_order(sell(3, dec!(102), dec!(5))).unwrap();
+
+        let trades = book.match_order(buy(10, dec!(102), dec!(12))).unwrap();
+
+        assert_eq!(trades.len(), 3);
+        assert_eq!(trades[0].price, dec!(100));
+        assert_eq!(trades[0].amount, dec!(5));
+        assert_eq!(trades[1].price, dec!(101));
+        assert_eq!(trades[1].amount, dec!(5));
+        assert_eq!(trades[2].price, dec!(102));
+        assert_eq!(trades[2].amount, dec!(2));
+        // Level 100 and 101 fully consumed; level 102 still has 3 remaining.
+        assert_eq!(book.best_ask(), Some(dec!(102)));
+        assert_eq!(book.len(), 1);
+    }
+
+    #[test]
+    fn sell_taker_walks_multiple_bid_levels() {
+        // Bids: 5 @ 102, 5 @ 101, 5 @ 100
+        // Taker sells 12 @ 100 → consumes level 102 (5), level 101 (5), 2 from 100.
+        let mut book = OrderBook::new();
+        book.add_order(buy(1, dec!(102), dec!(5))).unwrap();
+        book.add_order(buy(2, dec!(101), dec!(5))).unwrap();
+        book.add_order(buy(3, dec!(100), dec!(5))).unwrap();
+
+        let trades = book.match_order(sell(10, dec!(100), dec!(12))).unwrap();
+
+        assert_eq!(trades.len(), 3);
+        assert_eq!(trades[0].price, dec!(102));
+        assert_eq!(trades[0].amount, dec!(5));
+        assert_eq!(trades[1].price, dec!(101));
+        assert_eq!(trades[1].amount, dec!(5));
+        assert_eq!(trades[2].price, dec!(100));
+        assert_eq!(trades[2].amount, dec!(2));
+        // Level 102 and 101 consumed; level 100 still has 3 remaining.
+        assert_eq!(book.best_bid(), Some(dec!(100)));
+        assert_eq!(book.len(), 1);
+    }
+
+    // ─── match_order: execution price is always maker's price ─────────────
+
+    #[test]
+    fn execution_price_is_maker_price_not_taker() {
+        // Maker posted ask at 100. Taker bids at 105 (aggressive).
+        // Trade must execute at 100 (maker price), not 105.
+        let mut book = OrderBook::new();
+        book.add_order(sell(1, dec!(100), dec!(10))).unwrap();
+
+        let trades = book.match_order(buy(2, dec!(105), dec!(10))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].price, dec!(100)); // maker's price
     }
 }
