@@ -166,11 +166,11 @@ fn enforce_u128_addition_no_overflow(
 		.zip(parent_bits.iter())
 		.zip(carries.windows(2))
 	{
-		let li = Boolean::le_bits_to_fp_var(&[left_bit.clone()])?;
-		let ri = Boolean::le_bits_to_fp_var(&[right_bit.clone()])?;
-		let ci = Boolean::le_bits_to_fp_var(&[carry_pair[0].clone()])?;
-		let pi = Boolean::le_bits_to_fp_var(&[parent_bit.clone()])?;
-		let co = Boolean::le_bits_to_fp_var(&[carry_pair[1].clone()])?;
+		let li = Boolean::le_bits_to_fp_var(core::slice::from_ref(left_bit))?;
+		let ri = Boolean::le_bits_to_fp_var(core::slice::from_ref(right_bit))?;
+		let ci = Boolean::le_bits_to_fp_var(core::slice::from_ref(&carry_pair[0]))?;
+		let pi = Boolean::le_bits_to_fp_var(core::slice::from_ref(parent_bit))?;
+		let co = Boolean::le_bits_to_fp_var(core::slice::from_ref(&carry_pair[1]))?;
 
 		(li + ri + ci).enforce_equal(&(pi + co.clone() + co))?;
 	}
@@ -182,8 +182,8 @@ fn enforce_u128_addition_no_overflow(
 fn compute_carry_bits(left: u128, right: u128) -> [bool; 129] {
 	let mut carries = [false; 129];
 	let mut carry = false;
-	for i in 0..128 {
-		carries[i] = carry;
+	for (i, carry_slot) in carries.iter_mut().take(128).enumerate() {
+		*carry_slot = carry;
 		let a = ((left >> i) & 1) == 1;
 		let b = ((right >> i) & 1) == 1;
 		carry = (a & b) | (a & carry) | (b & carry);
