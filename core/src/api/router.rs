@@ -9,10 +9,14 @@
 //           GET    /api/balances
 //   API-05  GET    /ws  (WebSocket upgrade)
 
-use axum::{http::StatusCode, routing::get, Json, Router};
+use axum::{
+    http::StatusCode,
+    routing::{delete, get, post},
+    Json, Router,
+};
 use serde_json::{json, Value};
 
-use super::state::AppState;
+use super::{orders, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -23,10 +27,14 @@ use super::state::AppState;
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
-        // API routes are mounted here in later tasks:
-        //   .merge(orders::router())   ← API-03
-        //   .merge(data::router())     ← API-04
-        //   .route("/ws", get(ws::handler))  ← API-05
+        // API-03: order management
+        .route("/api/orders",     post(orders::place_order))
+        .route("/api/orders/:id", delete(orders::cancel_order))
+        // API-04 routes are mounted here in later tasks:
+        //   .route("/api/orderbook", get(data::orderbook_handler))
+        //   .route("/api/balances",  get(data::balances_handler))
+        // API-05:
+        //   .route("/ws", get(ws::handler))
         .with_state(state)
 }
 
