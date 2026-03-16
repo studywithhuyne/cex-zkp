@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { selectedUserId, connectionState } from "../../stores/appStore";
+  import { connectionState } from '../../stores/appStore';
+  import { authState } from '../../stores/authStore';
 
   let price = $state("");
   let amount = $state("");
@@ -24,7 +25,7 @@
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-user-id": $selectedUserId.toString()
+          "x-user-id": ($authState.userId!).toString()
         },
         body: JSON.stringify({
           side,
@@ -130,3 +131,4 @@
     </div>
   </form>
 </section>
+

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { selectedUserId } from "../../stores/appStore";
+  import { authState } from '../../stores/authStore';
   import { loadWasmVerifier, zkpVerify } from "../../lib/zkp-wasm";
 
   type ProofPayload = {
@@ -36,7 +36,7 @@
       const res = await fetch(
         `/api/zkp/proof?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent(coldWalletAssets)}`,
         {
-        headers: { "x-user-id": $selectedUserId.toString() }
+        headers: { "x-user-id": ($authState.userId!).toString() }
         }
       );
       if (!res.ok) {
@@ -304,3 +304,4 @@
     border-radius: 20px;
   }
 </style>
+

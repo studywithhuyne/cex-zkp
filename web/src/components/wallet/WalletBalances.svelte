@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { selectedUserId, balanceVersion } from "../../stores/appStore";
+  import { balanceVersion } from '../../stores/appStore';
+  import { authState } from '../../stores/authStore';
   import { fetchBalances } from "../../lib/api/client";
   import type { BalanceDto } from "../../lib/api/client";
 
@@ -9,7 +10,7 @@
   async function load() {
     isLoading = true;
     try {
-      balances = await fetchBalances($selectedUserId);
+      balances = await fetchBalances(($authState.userId!));
     } catch {
       balances = [];
     } finally {
@@ -18,7 +19,7 @@
   }
 
   $effect(() => {
-    void $selectedUserId;
+    void ($authState.userId!);
     void $balanceVersion;
     load();
   });
@@ -68,3 +69,4 @@
     </div>
   {/if}
 </section>
+

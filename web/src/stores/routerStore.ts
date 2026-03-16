@@ -1,9 +1,9 @@
 import { writable } from "svelte/store";
 
-export type Route = "/trade" | "/wallet" | "/zk-verify";
+export type Route = "/login" | "/trade" | "/wallet" | "/zk-verify";
 
-const VALID_ROUTES: Route[] = ["/trade", "/wallet", "/zk-verify"];
-const DEFAULT_ROUTE: Route = "/trade";
+const VALID_ROUTES: Route[] = ["/login", "/trade", "/wallet", "/zk-verify"];
+const DEFAULT_ROUTE: Route = "/login";
 
 function parseHash(): Route {
   const raw = window.location.hash.replace(/^#/, "") || "";

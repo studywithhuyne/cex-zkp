@@ -52,6 +52,24 @@ export async function apiDelete(path: string, userId = 1): Promise<void> {
   }
 }
 
+export async function apiPostPublic<T = unknown>(
+  path: string,
+  body: unknown,
+): Promise<T> {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: DEFAULT_HEADERS,
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(err.error || `POST ${path} failed`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 // ── Typed endpoint helpers ──────────────────────────────────────────────────
 
 export type OpenOrder = {
@@ -92,6 +110,13 @@ export type DepositResponse = {
   new_available: string;
 };
 
+export type AuthResponse = {
+  user_id: number;
+  username: string;
+  auth_mode: string;
+  auth_header: string;
+};
+
 export type BalanceDto = {
   asset: string;
   available: string;
@@ -115,3 +140,12 @@ export const postDeposit = (userId: number, asset: string, amount: string) =>
 
 export const cancelOrder = (userId: number, orderId: number) =>
   apiDelete(`/api/orders/${orderId}`, userId);
+
+export const postLogin = (username: string, password: string) =>
+  apiPostPublic<AuthResponse>("/api/auth/login", { username, password });
+
+export const postRegister = (username: string, password: string) =>
+  apiPostPublic<AuthResponse>("/api/auth/register", { username, password });
+
+export const fetchAuthMe = (userId: number) =>
+  apiGet<AuthResponse>("/api/auth/me", userId);

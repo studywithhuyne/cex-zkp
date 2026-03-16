@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { selectedUserId } from "../../stores/appStore";
+  import { authState } from '../../stores/authStore';
   import { orderBook } from "../../stores/orderBookStore";
   import { fetchOpenOrders, cancelOrder } from "../../lib/api/client";
   import type { OpenOrder } from "../../lib/api/client";
@@ -15,7 +15,7 @@
   async function loadOrders() {
     isLoading = true;
     try {
-      const nextOrders = await fetchOpenOrders($selectedUserId);
+      const nextOrders = await fetchOpenOrders(($authState.userId!));
       const nextTopId = nextOrders[0]?.order_id ?? null;
       const hasNewTop = lastTopOrderId !== null && nextTopId !== null && nextTopId !== lastTopOrderId;
 
@@ -42,7 +42,7 @@
   }
 
   $effect(() => {
-    void $selectedUserId;
+    void ($authState.userId!);
     void loadOrders();
     scheduleReload();
   });
@@ -79,7 +79,7 @@
   async function handleCancel(orderId: number) {
     cancellingId = orderId;
     try {
-      await cancelOrder($selectedUserId, orderId);
+      await cancelOrder(($authState.userId!), orderId);
       orders = orders.filter((o) => o.order_id !== orderId);
       window.dispatchEvent(new CustomEvent("orders:changed"));
     } catch (err: any) {
@@ -150,3 +150,4 @@
     {/if}
   </div>
 </section>
+

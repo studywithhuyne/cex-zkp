@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { selectedUserId, balanceVersion } from "../../stores/appStore";
+  import { balanceVersion } from '../../stores/appStore';
+  import { authState } from '../../stores/authStore';
   import { postDeposit } from "../../lib/api/client";
 
   let asset = $state("USDT");
@@ -20,7 +21,7 @@
     isError = false;
 
     try {
-      const res = await postDeposit($selectedUserId, asset, amount);
+      const res = await postDeposit(($authState.userId!), asset, amount);
       resultMsg = `Deposited ${res.deposited} ${res.asset}. New available: ${res.new_available}`;
       isError = false;
       amount = "";
@@ -78,3 +79,4 @@
     {/if}
   </div>
 </section>
+

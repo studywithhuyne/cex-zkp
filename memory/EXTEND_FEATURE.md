@@ -1,37 +1,32 @@
-# Comprehensive CEX Architecture & Feature Specifications
+# Enterprise CEX Architecture: The 6 Core Pillars
 
-This document outlines the architecture, frontend routing, and enterprise-grade backend features for the High-Performance CEX. All backend implementations strictly prioritize micro-second latency matching.
+This document outlines the complete lifecycle and architectural pillars of a production-grade Centralized Exchange (CEX).
 
-## 1. Frontend Architecture & Routing
-* **App Shell & Deterministic Identity:**
-  * Persistent Navbar linking to `/trade`, `/wallet`, and `/zk-verify`.
-  * **Mock Auth Module:** A dropdown to select dummy users (e.g., "Alice - ID: 1"). This automatically injects the `x-user-id` HTTP header (parsed as `u64`) into all REST and WebSocket requests, bypassing JWT/OAuth overhead during critical engine paths.
-* **Trading Terminal (`/trade`):**
-  * **OrderBook:** Real-time visual depth chart mapped via WebSocket streams.
-  * **Trade Form:** Inputs for Price (`rust_decimal` compatible) and Amount.
-  * **Order Management:** Unexecuted open orders list with instant "Cancel" actions, plus a live ticker for recent market trades.
-* **Portfolio & Wallet (`/wallet`):**
-  * Real-time display of Base and Quote token balances.
-  * **Mock Deposit:** Form to inject test funds directly into PostgreSQL.
-  * Personal executed trade history table.
+## Pillar 1: Identity & Access Management (Simple Auth)
+* **Registration & Login:** Streamlined account creation using only a **Username and Password**. No email verification is required, keeping the flow fast and simple for testing and demonstration.
+* **Security:** Passwords are hashed in the database using **Argon2id**. 
+* **Session Management:** Successful logins return a standard **JSON Web Token (JWT)**. Clients send this token via the `Authorization: Bearer <token>` header.
+* **Middleware:** An `axum::middleware` layer decodes the JWT, extracts the `user_id`, and safely passes it into the engine's core.
 
-## 2. Core Engine & Data Flow
-* **Multi-Symbol Routing (O(1) Complexity):** The core Engine utilizes a `HashMap<String, OrderBook>` to route orders to specific trading pairs (e.g., `BTC_USDT`, `ETH_USDT`) instantly. Both `Order` and `Trade` structs strictly enforce a `symbol` field.
-* **Real-Time Price Tracking (OHLCV):** * The matching engine NEVER calculates chart data directly to preserve latency.
-  * Upon a match, a `Trade` event is pushed to a lock-free async channel (`tokio::sync::mpsc`).
-  * A background worker consumes this channel, flushes data to PostgreSQL, and Axum serves the candlestick data to the Svelte frontend.
+## Pillar 2: In-Memory Ledger (Stateful Wallets)
+* **Balance Segregation:** Each user's asset (e.g., USDT, BTC) is split into two states within the RAM: `Free Balance` and `Locked Balance`.
+* **State Transition:** Placing an order deducts from `Free` and adds to `Locked`. Canceling an order reverses this atomically.
+* **Internal Hashing:** All internal ID generation utilizes **BLAKE3** for maximum speed.
 
-## 3. Zero-Knowledge Proof of Solvency (ZKP)
-* **Core Philosophy:** "Don't trust, verify." 
-* **Backend Mechanism (Merkle Sum Tree):** * Each leaf represents a user's `Hash(x-user-id, balance)` and their `balance`.
-  * The root node encapsulates the sum of all liabilities.
-  * The ZK Circuit (`arkworks` or `halo2`) enforces: `Total Liabilities <= Cold Wallet Assets`.
-* **Frontend Verification (`/zk-verify`):** * Retrieves the `Merkle Root` and user's `.proof` payload from the Axum API.
-  * Provides a drag-and-drop UI for the proof file.
-  * Executes the cryptographic verifier compiled to WebAssembly (Wasm) directly within the browser CPU, outputting a deterministic `VALID` or `INVALID` result.
+## Pillar 3: High-Frequency Matching Engine (The Core)
+* **Data Structure:** Implements `BTreeMap` for deterministic, `O(log n)` order insertion and retrieval.
+  * `Bids` (Buyers): Sorted descending (highest price first).
+  * `Asks` (Sellers): Sorted ascending (lowest price first).
+* **Execution Logic:** Strictly enforces **Price-Time Priority**. All math uses `rust_decimal` to prevent floating-point precision loss. Enforces Self-Trading Prevention (STP) to reject orders where taker and maker share the same `user_id`.
 
-## 4. Sub-millisecond Observability (Prometheus & Grafana)
-* **Metric Collection:** Utilizes the Rust `metrics` crate with atomic counters. Incrementing a metric takes ~1-2 nanoseconds, keeping the engine's speed uncompromised.
-* **Exporting & Visualization:** * Axum exposes a lightweight `GET /metrics` endpoint.
-  * A Dockerized **Prometheus** instance scrapes data every 1 second.
-  * **Grafana** visualizes critical metrics: Throughput (Orders/sec), Latency percentiles (p50, p90, p99), active symbols, and total locked value.
+## Pillar 4: Real-Time Gateway (Pub/Sub)
+* **REST API:** Handles state-mutating actions (Place Order, Cancel Order, Deposit).
+* **WebSocket Streams (`/ws`):** A high-throughput broadcast system sending `OrderBookUpdate` and `RecentTrade` events to maintain live UI depth charts.
+
+## Pillar 5: Settlement & Asynchronous Persistence
+* **RAM-First Settlement:** Upon an engine match, balances are updated directly in memory to maintain micro-second latency.
+* **Database Flushing:** Events pass through a lock-free `tokio::sync::mpsc` channel. A background worker batches these events and writes them to PostgreSQL via `sqlx`.
+
+## Pillar 6: Observability & Proof of Solvency
+* **Telemetry:** Uses the `metrics` crate with atomic counters (~1ns overhead) to expose Prometheus endpoints for monitoring in Grafana.
+* **ZKP Solvency:** Constructs a Merkle Sum Tree from the database state. The frontend executes a WebAssembly (Wasm) verifier to mathematically prove `Total Liabilities <= Cold Wallet Assets`.

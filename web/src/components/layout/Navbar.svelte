@@ -1,6 +1,7 @@
 <script lang="ts">
   import { router } from "../../stores/routerStore";
-  import { selectedUserId, connectionState, MOCK_USERS } from "../../stores/appStore";
+  import { connectionState } from "../../stores/appStore";
+  import { authState, logout } from "../../stores/authStore";
   import type { Route } from "../../stores/routerStore";
 
   const NAV_LINKS: { route: Route; label: string }[] = [
@@ -18,30 +19,44 @@
     </div>
 
     <!-- Navigation Links -->
-    <div class="flex items-center gap-1 rounded-lg bg-slate-900/60 p-1 border border-slate-800/60">
-      {#each NAV_LINKS as link}
-        <a
-          href="#{link.route}"
-          class="px-3 py-1.5 rounded-md text-xs font-medium tracking-wide transition-all
-            {$router === link.route
-              ? 'bg-sky-500/15 text-sky-300 border border-sky-400/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'}"
-        >
-          {link.label}
-        </a>
-      {/each}
-    </div>
-
-    <!-- User Selector + Status -->
-    <div class="flex items-center gap-3 shrink-0">
-      <select
-        bind:value={$selectedUserId}
-        class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5 text-xs text-slate-100 outline-none transition focus:border-sky-500/50 cursor-pointer"
-      >
-        {#each MOCK_USERS as user}
-          <option value={user.id}>{user.name} (ID: {user.id})</option>
+    {#if $authState.userId}
+      <div class="flex items-center gap-1 rounded-lg bg-slate-900/60 p-1 border border-slate-800/60">
+        {#each NAV_LINKS as link}
+          <a
+            href="#{link.route}"
+            class="px-3 py-1.5 rounded-md text-xs font-medium tracking-wide transition-all
+              {$router === link.route
+                ? 'bg-sky-500/15 text-sky-300 border border-sky-400/30'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'}"
+          >
+            {link.label}
+          </a>
         {/each}
-      </select>
+      </div>
+    {:else}
+      <div class="mono rounded-lg border border-slate-800/60 bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400">
+        Not signed in
+      </div>
+    {/if}
+
+    <!-- User + Status -->
+    <div class="flex items-center gap-3 shrink-0">
+      {#if $authState.userId}
+        <div class="mono rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5 text-xs text-slate-100">
+          {$authState.username} (ID: {$authState.userId})
+        </div>
+
+        <button
+          type="button"
+          class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5 text-xs text-slate-100 transition hover:border-slate-500"
+          onclick={() => {
+            logout();
+            router.navigate("/login");
+          }}
+        >
+          Logout
+        </button>
+      {/if}
 
       <div class="flex items-center gap-1.5" title="WebSocket: {$connectionState.ws}">
         <span

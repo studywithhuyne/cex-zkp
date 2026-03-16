@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { selectedUserId } from "../../stores/appStore";
+  import { authState } from '../../stores/authStore';
   import { fetchUserTrades } from "../../lib/api/client";
   import type { UserTrade } from "../../lib/api/client";
 
@@ -9,7 +9,7 @@
   async function load() {
     isLoading = true;
     try {
-      trades = await fetchUserTrades($selectedUserId);
+      trades = await fetchUserTrades(($authState.userId!));
     } catch {
       trades = [];
     } finally {
@@ -18,7 +18,7 @@
   }
 
   $effect(() => {
-    void $selectedUserId;
+    void ($authState.userId!);
     load();
   });
 
@@ -84,3 +84,4 @@
     scrollbar-width: none;
   }
 </style>
+

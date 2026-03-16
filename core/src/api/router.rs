@@ -16,7 +16,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use super::{data, metrics, orders, wallet, ws, zkp, state::AppState};
+use super::{auth, data, metrics, orders, wallet, ws, zkp, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -28,6 +28,10 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/metrics", get(metrics::metrics_handler))
+        // Pillar 1: username/password auth + identity bootstrap
+        .route("/api/auth/register", post(auth::register_handler))
+        .route("/api/auth/login",    post(auth::login_handler))
+        .route("/api/auth/me",       get(auth::me_handler))
         // API-03: order management
         .route("/api/orders",      post(orders::place_order))
         .route("/api/orders/open", get(data::open_orders_handler))

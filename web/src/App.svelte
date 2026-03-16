@@ -2,17 +2,35 @@
   import { onMount, onDestroy } from "svelte";
   import { orderBook } from "./stores/orderBookStore.js";
   import { router } from "./stores/routerStore.js";
+  import { authState, bootstrapAuth } from "./stores/authStore";
   import Navbar from "./components/layout/Navbar.svelte";
+  import LoginPage from "./components/pages/LoginPage.svelte";
   import TradePage from "./components/pages/TradePage.svelte";
   import WalletPage from "./components/pages/WalletPage.svelte";
   import ZkVerifyPage from "./components/pages/ZkVerifyPage.svelte";
 
-  onMount(() => {
+  onMount(async () => {
     orderBook.connect();
+    await bootstrapAuth();
   });
 
   onDestroy(() => {
     orderBook.disconnect();
+  });
+
+  $effect(() => {
+    if ($authState.loading) {
+      return;
+    }
+
+    if (!$authState.userId && $router !== "/login") {
+      router.navigate("/login");
+      return;
+    }
+
+    if ($authState.userId && $router === "/login") {
+      router.navigate("/trade");
+    }
   });
 </script>
 
@@ -20,7 +38,13 @@
   <Navbar />
 
   <main class="mt-4 md:mt-6">
-    {#if $router === "/trade"}
+    {#if $authState.loading}
+      <section class="terminal-panel-strong p-6 text-center text-sm text-slate-300">
+        Initializing session...
+      </section>
+    {:else if $router === "/login"}
+      <LoginPage />
+    {:else if $router === "/trade"}
       <TradePage />
     {:else if $router === "/wallet"}
       <WalletPage />
@@ -28,10 +52,4 @@
       <ZkVerifyPage />
     {/if}
   </main>
-
-  <footer class="mt-5 flex flex-wrap items-center gap-2 text-xs text-slate-400 md:mt-7">
-    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">Nginx SPA</span>
-    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">/api proxied</span>
-    <span class="mono rounded-full border border-slate-700/70 bg-slate-900/70 px-2 py-1">/ws ready</span>
-  </footer>
 </div>

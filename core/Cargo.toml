@@ -59,6 +59,20 @@ dotenvy = "0.15"
 # High-performance RwLock
 parking_lot = "0.12"
 
+# --- Pillar 1: Identity & Access Management ---
+# Argon2id password hashing (ASIC/GPU resistant)
+argon2 = "0.5"
+# JWT encode/decode (HS256)
+jsonwebtoken = "9"
+# Ed25519 digital signatures for API key auth
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+# Secure random generation
+rand = "0.8"
+# Base64 encoding for Ed25519 keys & signatures
+base64 = "0.22"
+# Hex encoding for API key IDs
+hex = "0.4"
+
 # Internal ZKP crate (Merkle tree + circuit primitives)
 zkp = { path = "../zkp" }
 
