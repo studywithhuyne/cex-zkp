@@ -2,8 +2,6 @@
   import { authState } from '../../stores/authStore';
   import { loadWasmVerifier, zkpVerify } from "../../lib/zkp-wasm";
 
-  let { mode = "user" }: { mode?: "user" | "exchange" } = $props();
-
   type ProofPayload = {
     user_id: string;
     leaf_balance: string;
@@ -213,7 +211,7 @@
   <div class="mb-4 flex items-start justify-between gap-3">
     <div>
       <h2 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">
-        {mode === "exchange" ? "Exchange Verification" : "User Verification"}
+        User Verification
       </h2>
     </div>
     <span class="mono rounded border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200">
@@ -313,18 +311,6 @@
           }
         })()}
         <div class="rounded-xl border border-slate-700/70 bg-slate-950/55 p-3 text-xs text-slate-300/90">
-          {#if mode === 'exchange'}
-            <p class="mono uppercase tracking-[0.14em] text-slate-400">Exchange Solvency</p>
-            {#if parsed?.solvency}
-              <p class="mt-2">Liabilities: <span class="mono text-slate-100">{parsed.solvency.total_liabilities}</span></p>
-              <p class="mt-1">Assets: <span class="mono text-slate-100">{parsed.solvency.cold_wallet_assets}</span></p>
-              <p class="mt-1 font-semibold {parsed.solvency.liabilities_leq_assets ? 'text-emerald-300' : 'text-rose-300'}">
-                {parsed.solvency.liabilities_leq_assets ? 'Result: PASS' : 'Result: FAIL'}
-              </p>
-            {:else}
-              <p class="mt-2 text-slate-400">No solvency data.</p>
-            {/if}
-          {:else}
             <p class="mono uppercase tracking-[0.14em] text-slate-400">User Inclusion</p>
             {#if parsed}
               <p class="mt-2">User ID: <span class="mono text-slate-100">{parsed.user_id}</span></p>
@@ -333,7 +319,6 @@
             {:else}
               <p class="mt-2 text-slate-400">No user proof loaded.</p>
             {/if}
-          {/if}
         </div>
       {/if}
     </div>
@@ -346,7 +331,7 @@
     >
       {status === 'verifying'
         ? 'Running Verifier...'
-        : (mode === 'exchange' ? 'Execute Exchange Verification' : 'Execute User Verification')}
+        : 'Execute User Verification'}
     </button>
   </div>
 </section>

@@ -193,6 +193,82 @@ fn parse_decimal(value: &str, err_prefix: &str) -> Result<Decimal, (StatusCode, 
     Ok(decimal)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Exchange-facing solvency check (no user-specific proof needed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct ZkpSolvencyResponse {
+    pub asset: String,
+    pub snapshot_size: usize,
+    pub root_hash: String,
+    pub root_balance: String,
+    pub total_liabilities: String,
+    pub cold_wallet_assets: String,
+    pub liabilities_leq_assets: bool,
+    pub verified_at: String,
+}
+
+pub async fn solvency_handler(
+    State(state): State<AppState>,
+    Query(query): Query<ZkpProofQuery>,
+) -> Result<Json<ZkpSolvencyResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let asset = query
+        .asset
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("USDT")
+        .to_ascii_uppercase();
+
+    let rows: Vec<SolvencyRow> = sqlx::query_as(
+        "SELECT user_id, (available + locked) AS balance
+         FROM balances
+         WHERE asset_symbol = $1
+         ORDER BY user_id ASC",
+    )
+    .bind(&asset)
+    .fetch_all(&state.db)
+    .await
+    .map_err(internal_error)?;
+
+    if rows.is_empty() {
+        return Err(not_found("no balances found for selected asset"));
+    }
+
+    let mut snapshots = Vec::with_capacity(rows.len());
+    for row in &rows {
+        if row.user_id <= 0 {
+            return Err(internal_error_msg("invalid user_id in balances snapshot"));
+        }
+        snapshots.push(BalanceSnapshot {
+            user_id: row.user_id as u64,
+            balance: row.balance,
+        });
+    }
+
+    let tree = build_poseidon_merkle_sum_tree(&snapshots)
+        .map_err(|e| internal_error_msg(&format!("failed to build solvency tree: {e}")))?;
+
+    let root = tree.root();
+    let cold_wallet_assets = resolve_cold_wallet_assets(&asset, query.cold_wallet_assets.as_deref())?;
+    let total_liabilities = root.balance;
+    let liabilities_leq_assets = total_liabilities <= cold_wallet_assets;
+
+    let verified_at = chrono::Utc::now().to_rfc3339();
+
+    Ok(Json(ZkpSolvencyResponse {
+        asset,
+        snapshot_size: tree.original_leaf_count(),
+        root_hash: hash_to_hex(&root.hash),
+        root_balance: root.balance.to_string(),
+        total_liabilities: total_liabilities.to_string(),
+        cold_wallet_assets: cold_wallet_assets.to_string(),
+        liabilities_leq_assets,
+        verified_at,
+    }))
+}
+
 fn hash_to_hex(bytes: &[u8; 32]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(64);

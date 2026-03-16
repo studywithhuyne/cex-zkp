@@ -48,6 +48,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/candles",       get(data::candles_handler))
         // ZKP-05: solvency proof package for authenticated user
         .route("/api/zkp/proof", get(zkp::proof_handler))
+        // ZKP: exchange-facing solvency check (no user-specific proof)
+        .route("/api/zkp/solvency", get(zkp::solvency_handler))
         // API-05: real-time WebSocket feed
         .route("/ws", get(ws::ws_handler))
         .with_state(state)
