@@ -2,6 +2,8 @@
   import { authState } from '../../stores/authStore';
   import { loadWasmVerifier, zkpVerify } from "../../lib/zkp-wasm";
 
+  let { mode = "user" }: { mode?: "user" | "exchange" } = $props();
+
   type ProofPayload = {
     user_id: string;
     leaf_balance: string;
@@ -207,51 +209,56 @@
   }
 </script>
 
-<section class="terminal-panel-strong p-4 sm:p-5 h-full flex flex-col relative overflow-hidden">
-  <div class="mb-4 flex items-center justify-between">
-    <h2 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">ZK Proof Verifier</h2>
-    <span class="mono rounded bg-fuchsia-500/10 border border-fuchsia-500/20 px-2 py-0.5 text-[10px] text-fuchsia-300">
+<section class="terminal-panel-strong p-4 sm:p-5 h-full flex flex-col relative overflow-hidden zk-panel">
+  <div class="mb-4 flex items-start justify-between gap-3">
+    <div>
+      <h2 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">
+        {mode === "exchange" ? "Exchange Verification" : "User Verification"}
+      </h2>
+    </div>
+    <span class="mono rounded border border-cyan-500/25 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200">
       Client-side WASM
     </span>
   </div>
 
   <div class="flex-1 flex flex-col space-y-4">
-
-    <!-- Fetch controls -->
-    <div class="flex items-center gap-2">
+    <div class="grid gap-2 md:grid-cols-[100px_1fr_1.2fr_auto] md:items-center">
       <select
         bind:value={assetFilter}
-        class="w-24 rounded border border-slate-700/80 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-fuchsia-500/50 cursor-pointer"
+        class="rounded border border-slate-700/80 bg-slate-900/80 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50 cursor-pointer"
       >
         <option value="USDT">USDT</option>
         <option value="BTC">BTC</option>
       </select>
+
       <input
         type="text"
         bind:value={coldWalletAssets}
         placeholder="Cold wallet assets"
-        class="w-40 rounded border border-slate-700/80 bg-slate-900/80 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-fuchsia-500/50"
+        class="rounded border border-slate-700/80 bg-slate-900/80 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
       />
+
       <button
         type="button"
         disabled={status === "fetching" || status === "verifying"}
         onclick={fetchProofFromServer}
-        class="flex-1 h-8 rounded border border-sky-500/30 bg-sky-500/10 text-xs font-semibold tracking-wider text-sky-300 transition hover:bg-sky-500/20 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none uppercase"
+        class="h-9 rounded border border-cyan-500/30 bg-cyan-500/12 px-3 text-xs font-semibold tracking-wider text-cyan-200 transition hover:bg-cyan-500/20 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none uppercase"
       >
-        {status === "fetching" ? "Fetching..." : "Fetch Proof from Server"}
+        {status === "fetching" ? "Fetching Proof..." : "Fetch From API"}
       </button>
+
+      <label class="inline-flex cursor-pointer items-center justify-center h-9 rounded border border-slate-700 bg-slate-800/90 px-3 text-[10px] uppercase tracking-wider text-slate-300 transition hover:bg-slate-700">
+        Upload JSON
+        <input type="file" accept=".json,.txt" class="hidden" onchange={handleFileUpload} />
+      </label>
     </div>
 
-    <!-- Proof input area -->
-    <div class="flex-1 space-y-1 flex flex-col">
-      <div class="flex justify-between items-end">
-        <label class="block text-[11px] font-medium tracking-widest text-slate-400 uppercase" for="proof-data">Proof Data</label>
-
-        <label class="cursor-pointer bg-slate-800 hover:bg-slate-700 transition border border-slate-700 text-slate-300 text-[10px] px-2 py-1 rounded uppercase tracking-wider">
-          Upload JSON
-          <input type="file" accept=".json,.txt" class="hidden" onchange={handleFileUpload} />
-        </label>
+    <div class="flex-1 space-y-2 flex flex-col">
+      <div class="flex items-center justify-between">
+        <label class="block text-[11px] font-medium tracking-widest text-slate-400 uppercase" for="proof-data">Proof Payload</label>
+        <span class="mono text-[10px] text-slate-500">Drag and drop supported</span>
       </div>
+
       <textarea
         id="proof-data"
         bind:value={proofData}
@@ -268,46 +275,34 @@
           dropActive = false;
         }}
         ondrop={handleDrop}
-        placeholder={'Click "Fetch Proof from Server" above, or paste JSON...\n\nExpected fields:\n  user_id, asset, leaf_balance,\n  root_hash, root_balance, merkle_path'}
-        class="mono mt-2 block w-full flex-1 min-h-30 resize-none rounded-lg border bg-slate-900/80 px-3 py-2 text-xs text-slate-300 outline-none transition hide-scrollbar placeholder:text-slate-600 {dropActive ? 'border-sky-400/60 ring-1 ring-sky-400/40' : 'border-slate-700/80 focus:border-fuchsia-500/50'}"
+        placeholder={'Fetch from API, paste JSON payload, or upload proof file.\n\nRequired fields:\n  user_id, leaf_balance, root_hash, root_balance, merkle_path'}
+        class="mono mt-1 block w-full flex-1 min-h-36 resize-none rounded-xl border bg-slate-950/70 px-3 py-2 text-xs text-slate-300 outline-none transition hide-scrollbar placeholder:text-slate-600 {dropActive ? 'border-cyan-400/60 ring-1 ring-cyan-400/40' : 'border-slate-700/80 focus:border-cyan-500/50'}"
       ></textarea>
-      <p class="text-[10px] text-slate-500">Tip: drag-and-drop a .json proof file directly onto the textarea.</p>
     </div>
 
-    <!-- Actions & Status -->
-    <div class="space-y-3">
-      <div class="flex items-center justify-between p-3 rounded-lg border bg-slate-900/60 {
-        status === 'valid'     ? 'border-emerald-500/40 text-emerald-400' :
-        status === 'invalid'   ? 'border-rose-500/40 text-rose-400' :
-        status === 'error'     ? 'border-orange-500/40 text-orange-400' :
-        status === 'verifying' ? 'border-sky-500/40 text-sky-400' :
-        status === 'fetching'  ? 'border-fuchsia-500/40 text-fuchsia-400' :
-        'border-slate-800 text-slate-500'
+    <div class="grid gap-3 md:grid-cols-[1.25fr_1fr]">
+      <div class="status-board p-3 rounded-xl border {
+        status === 'valid'     ? 'border-emerald-500/40 text-emerald-300' :
+        status === 'invalid'   ? 'border-rose-500/40 text-rose-300' :
+        status === 'error'     ? 'border-orange-500/40 text-orange-300' :
+        status === 'verifying' ? 'border-cyan-500/40 text-cyan-300' :
+        status === 'fetching'  ? 'border-sky-500/40 text-sky-300' :
+        'border-slate-800 text-slate-400'
       }">
-        <span class="text-[11px] uppercase tracking-widest font-semibold font-mono">
-          {#if status === 'idle'}Status: Waiting
-          {:else if status === 'fetching'}Fetching from server...
-          {:else if status === 'verifying'}Verifying Proof...
-          {:else if status === 'valid'}Verification PASSED
-          {:else if status === 'invalid'}Verification FAILED
-          {:else if status === 'error'}Error occurred
+        <p class="mono text-[11px] uppercase tracking-[0.15em] font-semibold">
+          {#if status === 'idle'}Status: Ready
+          {:else if status === 'fetching'}Status: Fetching proof
+          {:else if status === 'verifying'}Status: Verifying
+          {:else if status === 'valid'}Status: Passed
+          {:else if status === 'invalid'}Status: Failed
+          {:else if status === 'error'}Status: Error
           {/if}
-        </span>
+        </p>
 
-        {#if status === 'valid'}
-          <span class="text-lg">✓</span>
-        {:else if status === 'invalid'}
-          <span class="text-lg">✗</span>
-        {:else if status === 'verifying' || status === 'fetching'}
-          <span class="animate-spin text-lg inline-block">⚙</span>
+        {#if errorMsg}
+          <p class="mt-2 text-xs leading-relaxed text-orange-300/95">{errorMsg}</p>
         {/if}
       </div>
-
-      {#if errorMsg}
-        <div class="text-[10px] text-orange-400 p-2 bg-orange-500/10 rounded border border-orange-500/20">
-          {errorMsg}
-        </div>
-      {/if}
 
       {#if proofData}
         {@const parsed = (() => {
@@ -317,27 +312,56 @@
             return null;
           }
         })()}
-        {#if parsed?.solvency}
-          <div class="text-[10px] p-2 rounded border border-slate-700/70 bg-slate-900/70 text-slate-300">
-            Solvency snapshot: liabilities={parsed.solvency.total_liabilities}, assets={parsed.solvency.cold_wallet_assets},
-            check={parsed.solvency.liabilities_leq_assets ? "PASS" : "FAIL"}
-          </div>
-        {/if}
+        <div class="rounded-xl border border-slate-700/70 bg-slate-950/55 p-3 text-xs text-slate-300/90">
+          {#if mode === 'exchange'}
+            <p class="mono uppercase tracking-[0.14em] text-slate-400">Exchange Solvency</p>
+            {#if parsed?.solvency}
+              <p class="mt-2">Liabilities: <span class="mono text-slate-100">{parsed.solvency.total_liabilities}</span></p>
+              <p class="mt-1">Assets: <span class="mono text-slate-100">{parsed.solvency.cold_wallet_assets}</span></p>
+              <p class="mt-1 font-semibold {parsed.solvency.liabilities_leq_assets ? 'text-emerald-300' : 'text-rose-300'}">
+                {parsed.solvency.liabilities_leq_assets ? 'Result: PASS' : 'Result: FAIL'}
+              </p>
+            {:else}
+              <p class="mt-2 text-slate-400">No solvency data.</p>
+            {/if}
+          {:else}
+            <p class="mono uppercase tracking-[0.14em] text-slate-400">User Inclusion</p>
+            {#if parsed}
+              <p class="mt-2">User ID: <span class="mono text-slate-100">{parsed.user_id}</span></p>
+              <p class="mt-1">Leaf Balance: <span class="mono text-slate-100">{parsed.leaf_balance}</span></p>
+              <p class="mt-1">Merkle Path: <span class="mono text-slate-100">{parsed.merkle_path.length}</span></p>
+            {:else}
+              <p class="mt-2 text-slate-400">No user proof loaded.</p>
+            {/if}
+          {/if}
+        </div>
       {/if}
-
-      <button
-        type="button"
-        onclick={verifyProof}
-        disabled={status === 'verifying' || status === 'fetching'}
-        class="w-full h-10 rounded-lg border border-fuchsia-500/30 bg-fuchsia-500/20 text-sm font-semibold tracking-wider text-fuchsia-300 transition hover:bg-fuchsia-500/30 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 uppercase"
-      >
-        {status === 'verifying' ? 'Processing module...' : 'Run ZK Verifier'}
-      </button>
     </div>
+
+    <button
+      type="button"
+      onclick={verifyProof}
+      disabled={status === 'verifying' || status === 'fetching'}
+      class="w-full h-10 rounded-xl border border-cyan-500/35 bg-cyan-500/18 text-sm font-semibold tracking-wider text-cyan-200 transition hover:bg-cyan-500/26 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 uppercase"
+    >
+      {status === 'verifying'
+        ? 'Running Verifier...'
+        : (mode === 'exchange' ? 'Execute Exchange Verification' : 'Execute User Verification')}
+    </button>
   </div>
 </section>
 
 <style>
+  .zk-panel {
+    background:
+      radial-gradient(740px 220px at 100% -20%, rgba(34, 211, 238, 0.1), transparent 60%),
+      color-mix(in srgb, #020617 84%, transparent);
+  }
+
+  .status-board {
+    background: rgba(2, 6, 23, 0.6);
+  }
+
   .hide-scrollbar::-webkit-scrollbar {
     width: 6px;
   }

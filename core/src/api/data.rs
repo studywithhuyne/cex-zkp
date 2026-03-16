@@ -213,7 +213,8 @@ pub async fn average_price_handler(
             if denom.is_zero() {
                 None
             } else {
-                Some(((((*bid_price * *ask_qty) + (*ask_price * *bid_qty)) / denom)).round_dp(4))
+                let weighted_sum = (*bid_price * *ask_qty) + (*ask_price * *bid_qty);
+                Some((weighted_sum / denom).round_dp(4))
             }
         }
         _ => None,
