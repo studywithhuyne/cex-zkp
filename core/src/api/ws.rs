@@ -59,11 +59,15 @@ pub struct WsPriceLevel {
 pub enum WsEvent {
     /// Full top-N depth snapshot; sent after every book mutation.
     OrderbookUpdate {
-        bids: Vec<WsPriceLevel>,
-        asks: Vec<WsPriceLevel>,
+        /// Trading pair symbol, e.g. "BTC_USDT".
+        symbol: String,
+        bids:   Vec<WsPriceLevel>,
+        asks:   Vec<WsPriceLevel>,
     },
     /// A single trade fill — broadcast once per matched trade.
     TradeExecuted {
+        /// Trading pair symbol, e.g. "BTC_USDT".
+        symbol: String,
         price:  String,
         amount: String,
     },

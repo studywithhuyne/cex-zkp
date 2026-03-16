@@ -16,7 +16,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use super::{data, orders, ws, zkp, state::AppState};
+use super::{data, metrics, orders, wallet, ws, zkp, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -27,12 +27,20 @@ use super::{data, orders, ws, zkp, state::AppState};
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health_handler))
+        .route("/metrics", get(metrics::metrics_handler))
         // API-03: order management
-        .route("/api/orders",     post(orders::place_order))
-        .route("/api/orders/:id", delete(orders::cancel_order))
+        .route("/api/orders",      post(orders::place_order))
+        .route("/api/orders/open", get(data::open_orders_handler))
+        .route("/api/orders/:id",  delete(orders::cancel_order))
         // API-04: market data and user balances
         .route("/api/orderbook", get(data::orderbook_handler))
         .route("/api/balances",  get(data::balances_handler))
+        // Wallet: deposit and personal trade history
+        .route("/api/deposit",       post(wallet::deposit_handler))
+        .route("/api/trades/recent", get(data::recent_trades_handler))
+        .route("/api/trades/user",   get(wallet::user_trades_handler))
+        // OHLCV candlestick data for the chart
+        .route("/api/candles",       get(data::candles_handler))
         // ZKP-05: solvency proof package for authenticated user
         .route("/api/zkp/proof", get(zkp::proof_handler))
         // API-05: real-time WebSocket feed

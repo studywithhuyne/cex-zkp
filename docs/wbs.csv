@@ -29,7 +29,7 @@ Phase,Task_ID,Task_Name,Description,Status
 5. Frontend (Svelte),UI-04,Component: Trade Form,"Form Input Price, Amount. Nút Buy (màu xanh), Sell (màu đỏ). Gọi REST POST /api/orders",DONE
 5. Frontend (Svelte),UI-05,Component: User Header,"Dropdown chọn User ID giả lập (VD: Alice - ID 1, Bob - ID 2) để gán vào x-user-id header",DONE
 5. Frontend (Svelte),UI-06,Component: ZK Verifier,"Giao diện upload/fetch file proof. Gọi module Wasm (wasm-bindgen). Hiển thị kết quả Valid/Invalid",DONE
-6. DevOps & Infra,OPS-01,Backend Dockerfile,"Multi-stage build cho Rust: Builder image (compile) -> Alpine/Distroless image (run)",TODO
-6. DevOps & Infra,OPS-02,Frontend Dockerfile,"Build Svelte Vite ra thư mục dist/, copy vào Nginx alpine image",TODO
-6. DevOps & Infra,OPS-03,Nginx Config,"Viết nginx.conf: proxy_pass /api, proxy_pass /ws (upgrade headers), try_files cho file tĩnh",TODO
-6. DevOps & Infra,OPS-04,Full Docker Compose,"Gộp Postgres, Backend, Frontend vào mạng chung (docker network), test full luồng",TODO
+6. DevOps & Infra,OPS-01,Backend Dockerfile,"Multi-stage build cho Rust: Builder image (compile) -> Alpine/Distroless image (run)",DONE
+6. DevOps & Infra,OPS-02,Frontend Dockerfile,"Build Svelte Vite ra thư mục dist/, copy vào Nginx alpine image",DONE
+6. DevOps & Infra,OPS-03,Nginx Config,"Viết nginx.conf: proxy_pass /api, proxy_pass /ws (upgrade headers), try_files cho file tĩnh",DONE
+6. DevOps & Infra,OPS-04,Full Docker Compose,"Gộp Postgres, Backend, Frontend vào mạng chung (docker network), test full luồng",DONE

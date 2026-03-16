@@ -13,6 +13,7 @@ use zkp::tree::{build_poseidon_merkle_sum_tree, BalanceSnapshot};
 #[derive(Debug, Deserialize)]
 pub struct ZkpProofQuery {
     pub asset: Option<String>,
+    pub cold_wallet_assets: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -32,6 +33,23 @@ pub struct ZkpProofResponse {
     pub root_hash: String,
     pub root_balance: String,
     pub merkle_path: Vec<ZkpProofStepDto>,
+    pub public_inputs: ZkpPublicInputsDto,
+    pub solvency: ZkpSolvencyDto,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ZkpPublicInputsDto {
+    pub expected_root_hash: String,
+    pub expected_root_balance: String,
+    pub expected_user_id: u64,
+    pub expected_cold_wallet_assets: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ZkpSolvencyDto {
+    pub total_liabilities: String,
+    pub cold_wallet_assets: String,
+    pub liabilities_leq_assets: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -106,6 +124,10 @@ pub async fn proof_handler(
         })
         .collect();
 
+    let cold_wallet_assets = resolve_cold_wallet_assets(&asset, query.cold_wallet_assets.as_deref())?;
+    let total_liabilities = proof.root.balance;
+    let liabilities_leq_assets = total_liabilities <= cold_wallet_assets;
+
     Ok(Json(ZkpProofResponse {
         user_id,
         asset,
@@ -115,7 +137,60 @@ pub async fn proof_handler(
         root_hash: hash_to_hex(&proof.root.hash),
         root_balance: proof.root.balance.to_string(),
         merkle_path,
+        public_inputs: ZkpPublicInputsDto {
+            expected_root_hash: hash_to_hex(&proof.root.hash),
+            expected_root_balance: proof.root.balance.to_string(),
+            expected_user_id: user_id,
+            expected_cold_wallet_assets: cold_wallet_assets.to_string(),
+        },
+        solvency: ZkpSolvencyDto {
+            total_liabilities: total_liabilities.to_string(),
+            cold_wallet_assets: cold_wallet_assets.to_string(),
+            liabilities_leq_assets,
+        },
     }))
+}
+
+fn resolve_cold_wallet_assets(
+    asset: &str,
+    query_value: Option<&str>,
+) -> Result<Decimal, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(raw) = query_value.map(str::trim).filter(|s| !s.is_empty()) {
+        return parse_decimal(raw, "invalid query param cold_wallet_assets");
+    }
+
+    let env_key = format!("COLD_WALLET_ASSETS_{}", asset);
+    if let Ok(raw) = std::env::var(&env_key) {
+        return parse_decimal(raw.trim(), &format!("invalid env {env_key}"));
+    }
+
+    Err((
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({
+            "error": format!(
+                "missing cold wallet assets value; pass ?cold_wallet_assets=... or set env {}",
+                env_key
+            )
+        })),
+    ))
+}
+
+fn parse_decimal(value: &str, err_prefix: &str) -> Result<Decimal, (StatusCode, Json<serde_json::Value>)> {
+    let decimal = value.parse::<Decimal>().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("{err_prefix}: {value}") })),
+        )
+    })?;
+
+    if decimal.is_sign_negative() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("{err_prefix}: value must be non-negative") })),
+        ));
+    }
+
+    Ok(decimal)
 }
 
 fn hash_to_hex(bytes: &[u8; 32]) -> String {

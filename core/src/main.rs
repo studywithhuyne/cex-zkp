@@ -2,11 +2,16 @@
 
 use matching_engine::api::{router, state::AppState};
 use matching_engine::db::{pool, worker};
+use matching_engine::observability::metrics as observability_metrics;
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
     tracing::info!("Matching Engine starting...");
+
+    let metrics_handle = observability_metrics::install_prometheus_recorder()
+        .expect("Failed to initialise Prometheus recorder");
+    tracing::info!("Prometheus metrics recorder ready");
 
     // ── DB layer ──────────────────────────────────────────────────────────────
     let db_pool = pool::create_pool()
@@ -19,7 +24,7 @@ async fn main() {
     tracing::info!("Persistence worker spawned (buffer={})", worker::WORKER_BUFFER);
 
     // ── Axum server ───────────────────────────────────────────────────────────
-    let app_state = AppState::new(db_pool, events_tx);
+    let app_state = AppState::new(db_pool, events_tx, metrics_handle);
     let app = router::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")

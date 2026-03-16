@@ -78,6 +78,26 @@ pub struct OrderLog {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// candles
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One OHLCV candle row from the `candles` table.
+/// Written by the persistence worker; never touched during live matching.
+#[derive(Debug, sqlx::FromRow)]
+pub struct Candle {
+    pub symbol:    String,
+    /// Interval label: "1m", "5m", "1h", or "1d".
+    pub interval:  String,
+    /// Start timestamp of this candle (UTC, floored to interval boundary).
+    pub open_time: DateTime<Utc>,
+    pub open:      Decimal,
+    pub high:      Decimal,
+    pub low:       Decimal,
+    pub close:     Decimal,
+    pub volume:    Decimal,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // trades_log
 // ─────────────────────────────────────────────────────────────────────────────
 

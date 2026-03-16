@@ -256,8 +256,9 @@ impl OrderBook {
             trades.push(Trade {
                 maker_order_id: maker_id,
                 taker_order_id: taker.id,
-                price: best_ask, // execution at the maker's (ask) price
-                amount: fill_qty,
+                symbol:         taker.symbol.clone(),
+                price:          best_ask, // execution at the maker's (ask) price
+                amount:         fill_qty,
             });
 
             if maker_filled {
@@ -298,8 +299,9 @@ impl OrderBook {
             trades.push(Trade {
                 maker_order_id: maker_id,
                 taker_order_id: taker.id,
-                price: best_bid, // execution at the maker's (bid) price
-                amount: fill_qty,
+                symbol:         taker.symbol.clone(),
+                price:          best_bid, // execution at the maker's (bid) price
+                amount:         fill_qty,
             });
 
             if maker_filled {
@@ -355,11 +357,11 @@ mod tests {
     use rust_decimal_macros::dec;
 
     fn buy(id: u64, price: Decimal, amount: Decimal) -> Order {
-        Order::new(id, 1, Side::Buy, price, amount)
+        Order::new(id, 1, "BTC_USDT", Side::Buy, price, amount)
     }
 
     fn sell(id: u64, price: Decimal, amount: Decimal) -> Order {
-        Order::new(id, 2, Side::Sell, price, amount)
+        Order::new(id, 2, "BTC_USDT", Side::Sell, price, amount)
     }
 
     // ─── add_order ────────────────────────────────────────────────────────
@@ -874,7 +876,7 @@ mod proptest_suite {
 
                 // Sequential IDs guarantee no DuplicateOrderId.
                 // price >= 90 > 0 and amount >= 1 > 0, so no validation errors.
-                let order  = Order::new(id, 1, side, price, amount);
+                let order  = Order::new(id, 1, "BTC_USDT", side, price, amount);
                 let trades = book.match_order(order)
                     .expect("randomly generated order must not produce EngineError");
 
@@ -927,7 +929,7 @@ mod proptest_suite {
                 let price  = Decimal::from(*price_raw);
                 let amount = Decimal::from(*amount_raw);
                 let side   = if *is_buy { Side::Buy } else { Side::Sell };
-                let order  = Order::new(id, 1, side, price, amount);
+                let order  = Order::new(id, 1, "BTC_USDT", side, price, amount);
                 let _      = book.match_order(order);
             }
             // If we reach here without a panic, the test passes.

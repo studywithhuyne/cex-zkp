@@ -14,6 +14,7 @@
 // │      → orders_log.order_id                                            │
 // └───────────────────────────────────────────────────────────────────────┘
 
+use chrono::{DateTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio::sync::mpsc;
@@ -42,6 +43,8 @@ pub enum PersistenceEvent {
         trade:         Trade,
         maker_user_id: u64,
         taker_user_id: u64,
+        /// Side of the TAKER order; determines buyer/seller for balance updates.
+        taker_side:    Side,
         base_asset:    String,
         quote_asset:   String,
     },
@@ -93,6 +96,7 @@ async fn run_worker(pool: PgPool, mut rx: mpsc::Receiver<PersistenceEvent>) {
                 trade,
                 maker_user_id,
                 taker_user_id,
+                taker_side,
                 base_asset,
                 quote_asset,
             } => {
@@ -116,6 +120,44 @@ async fn run_worker(pool: PgPool, mut rx: mpsc::Receiver<PersistenceEvent>) {
                 }
                 if let Err(e) = apply_fill(&pool, trade.taker_order_id, trade.amount).await {
                     error!(error = ?e, order_id = trade.taker_order_id, "Failed to update taker fill");
+                }
+
+                // … finally update user balances (skip self-trades — net effect is zero).
+                if maker_user_id != taker_user_id {
+                    let (buyer_id, seller_id) = match taker_side {
+                        Side::Buy  => (taker_user_id, maker_user_id),
+                        Side::Sell => (maker_user_id, taker_user_id),
+                    };
+                    if let Err(e) = update_balances(
+                        &pool,
+                        buyer_id,
+                        seller_id,
+                        &base_asset,
+                        &quote_asset,
+                        trade.amount,
+                        trade.price,
+                    )
+                    .await
+                    {
+                        error!(error = ?e, buyer = buyer_id, seller = seller_id, "Failed to update balances after trade");
+                    }
+                }
+
+                // … finally aggregate into OHLCV candles for all standard intervals.
+                let symbol   = format!("{}_{}", base_asset, quote_asset);
+                let trade_ts = Utc::now();
+                for &(label, secs) in CANDLE_INTERVALS {
+                    let open_time = floor_to_interval_secs(trade_ts, secs);
+                    if let Err(e) = upsert_candle(
+                        &pool, &symbol, label, open_time, trade.price, trade.amount,
+                    )
+                    .await
+                    {
+                        error!(
+                            error = ?e, symbol = %symbol, interval = label,
+                            "Failed to upsert OHLCV candle"
+                        );
+                    }
                 }
             }
 
@@ -250,6 +292,129 @@ async fn mark_cancelled(pool: &PgPool, order_id: u64) -> Result<(), sqlx::Error>
         "#,
     )
     .bind(order_id as i64)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// UPDATE balances for both sides of a completed trade.
+///
+/// Buyer  receives `amount` of base_asset  (BTC) and spends `amount * price` of quote_asset (USDT).
+/// Seller receives `amount * price` USDT   and spends `amount` BTC.
+async fn update_balances(
+    pool:           &PgPool,
+    buyer_user_id:  u64,
+    seller_user_id: u64,
+    base_asset:     &str,    // e.g. "BTC"
+    quote_asset:    &str,    // e.g. "USDT"
+    amount:         Decimal, // BTC quantity traded
+    price:          Decimal, // execution price
+) -> Result<(), sqlx::Error> {
+    let quote_amount = amount * price;
+
+    // Buyer gains BTC
+    sqlx::query(
+        "UPDATE balances SET available = available + $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(amount)
+    .bind(buyer_user_id as i64)
+    .bind(base_asset)
+    .execute(pool)
+    .await?;
+
+    // Buyer spends USDT
+    sqlx::query(
+        "UPDATE balances SET available = available - $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(quote_amount)
+    .bind(buyer_user_id as i64)
+    .bind(quote_asset)
+    .execute(pool)
+    .await?;
+
+    // Seller spends BTC
+    sqlx::query(
+        "UPDATE balances SET available = available - $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(amount)
+    .bind(seller_user_id as i64)
+    .bind(base_asset)
+    .execute(pool)
+    .await?;
+
+    // Seller gains USDT
+    sqlx::query(
+        "UPDATE balances SET available = available + $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(quote_amount)
+    .bind(seller_user_id as i64)
+    .bind(quote_asset)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OHLCV helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Standard candlestick intervals: (label, duration_in_seconds).
+/// Each trade fill is aggregated into all four intervals simultaneously.
+const CANDLE_INTERVALS: &[(&str, i64)] = &[
+    ("1m",  60),
+    ("5m",  300),
+    ("1h",  3_600),
+    ("1d",  86_400),
+];
+
+/// Floor `time` down to the nearest multiple of `interval_secs`.
+/// E.g. 12:47:33 with interval=60 → 12:47:00.
+fn floor_to_interval_secs(time: DateTime<Utc>, interval_secs: i64) -> DateTime<Utc> {
+    let ts      = time.timestamp();
+    let floored = (ts / interval_secs) * interval_secs;
+    Utc.timestamp_opt(floored, 0)
+        .single()
+        .unwrap_or(time)
+}
+
+/// UPSERT one trade into the appropriate OHLCV candle row.
+///
+/// On INSERT: sets open = high = low = close = `price`, volume = `amount`.
+/// On CONFLICT (same symbol+interval+open_time):
+///   - high  = GREATEST(existing, new)
+///   - low   = LEAST(existing, new)
+///   - close = new price (last trade wins — sequential worker guarantees order)
+///   - volume accumulates
+async fn upsert_candle(
+    pool:      &PgPool,
+    symbol:    &str,
+    interval:  &str,
+    open_time: DateTime<Utc>,
+    price:     Decimal,
+    amount:    Decimal,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO candles (symbol, interval, open_time, open, high, low, close, volume)
+        VALUES ($1, $2, $3, $4, $4, $4, $4, $5)
+        ON CONFLICT (symbol, interval, open_time) DO UPDATE SET
+            high   = GREATEST(candles.high,  EXCLUDED.high),
+            low    = LEAST(candles.low,   EXCLUDED.low),
+            close  = EXCLUDED.close,
+            volume = candles.volume + EXCLUDED.volume
+        "#,
+    )
+    .bind(symbol)
+    .bind(interval)
+    .bind(open_time)
+    .bind(price)
+    .bind(amount)
     .execute(pool)
     .await?;
 

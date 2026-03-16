@@ -25,6 +25,7 @@ pub struct PublicInputsPayload {
     pub expected_root_hash: String,
     pub expected_root_balance: String,
     pub expected_user_id: Option<u64>,
+    pub expected_cold_wallet_assets: Option<String>,
 }
 
 pub fn verify_proof_json(proof_json: &str, public_inputs_json: &str) -> bool {
@@ -53,6 +54,11 @@ fn verify_proof_payload(
     let leaf_balance = parse_decimal(&proof.leaf_balance)?;
     let declared_root_balance = parse_decimal(&proof.root_balance)?;
     let expected_root_balance = parse_decimal(&public_inputs.expected_root_balance)?;
+    let expected_cold_wallet_assets = public_inputs
+        .expected_cold_wallet_assets
+        .as_deref()
+        .map(parse_decimal)
+        .transpose()?;
 
     let mut current_hash = poseidon_leaf_hash(proof.user_id, &leaf_balance).map_err(|e| e.to_string())?;
     let mut current_balance = leaf_balance;
@@ -93,12 +99,17 @@ fn verify_proof_payload(
     let declared_root_hash = parse_hash_hex(&proof.root_hash)?;
     let expected_root_hash = parse_hash_hex(&public_inputs.expected_root_hash)?;
 
-    Ok(
-        current_hash == declared_root_hash
-            && current_hash == expected_root_hash
-            && current_balance == declared_root_balance
-            && current_balance == expected_root_balance,
-    )
+    let root_match = current_hash == declared_root_hash
+        && current_hash == expected_root_hash
+        && current_balance == declared_root_balance
+        && current_balance == expected_root_balance;
+
+    let solvency_match = match expected_cold_wallet_assets {
+        Some(cold_wallet_assets) => current_balance <= cold_wallet_assets,
+        None => true,
+    };
+
+    Ok(root_match && solvency_match)
 }
 
 fn parse_hash_hex(value: &str) -> Result<HashBytes, String> {
@@ -187,6 +198,41 @@ mod tests {
             "expected_root_hash": "11".repeat(32),
             "expected_root_balance": "10",
             "expected_user_id": 7,
+        })
+        .to_string();
+
+        assert!(!verify_proof_json(&proof_json, &public_inputs_json));
+    }
+
+    #[test]
+    fn verify_proof_json_rejects_when_liabilities_exceed_assets() {
+        let snapshots = vec![
+            BalanceSnapshot { user_id: 1, balance: dec!(10) },
+            BalanceSnapshot { user_id: 2, balance: dec!(7.5) },
+            BalanceSnapshot { user_id: 3, balance: dec!(3.25) },
+        ];
+
+        let tree = build_poseidon_merkle_sum_tree(&snapshots).expect("tree build must succeed");
+        let proof = tree.generate_proof(0).expect("proof generation must succeed");
+
+        let proof_json = json!({
+            "user_id": snapshots[0].user_id,
+            "leaf_balance": snapshots[0].balance.to_string(),
+            "root_hash": hash_to_hex(&proof.root.hash),
+            "root_balance": proof.root.balance.to_string(),
+            "merkle_path": proof.path.iter().map(|step| json!({
+                "sibling_hash": hash_to_hex(&step.sibling_hash),
+                "sibling_balance": step.sibling_balance.to_string(),
+                "sibling_is_left": step.sibling_is_left,
+            })).collect::<Vec<_>>(),
+        })
+        .to_string();
+
+        let public_inputs_json = json!({
+            "expected_root_hash": hash_to_hex(&proof.root.hash),
+            "expected_root_balance": proof.root.balance.to_string(),
+            "expected_user_id": snapshots[0].user_id,
+            "expected_cold_wallet_assets": "1",
         })
         .to_string();
 

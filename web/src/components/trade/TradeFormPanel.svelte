@@ -28,8 +28,8 @@
         },
         body: JSON.stringify({
           side,
-          price,
-          amount,
+          price: String(price),
+          amount: String(amount),
           base_asset: "BTC",
           quote_asset: "USDT"
         })
@@ -40,6 +40,7 @@
       if (resp.ok) {
         resultMsg = `Success! Order ID: ${data.order_id || 'Matched'}`;
         isError = false;
+        window.dispatchEvent(new CustomEvent("orders:changed"));
         // Optionally clear form
         // price = "";
         // amount = "";

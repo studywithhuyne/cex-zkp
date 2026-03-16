@@ -26,6 +26,7 @@ use axum::{
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use std::time::Instant;
 
 use crate::{
     api::{
@@ -36,6 +37,13 @@ use crate::{
     db::worker::PersistenceEvent,
     engine::{Order, Side},
 };
+
+#[derive(Debug, sqlx::FromRow)]
+struct OpenOrderLookupRow {
+    user_id: i64,
+    base_asset: String,
+    quote_asset: String,
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request / Response types
@@ -105,17 +113,37 @@ pub async fn place_order(
 
     // --- Allocate ID and build Order ---
     let order_id = state.alloc_order_id();
-    let order    = Order::new(order_id, user_id, side, price, amount);
+    // Derive canonical symbol from base/quote pair (e.g. "BTC_USDT").
+    let symbol   = format!("{}_{}", req.base_asset, req.quote_asset);
+    let side_label = match side {
+        Side::Buy => "buy",
+        Side::Sell => "sell",
+    };
+    let order    = Order::new(order_id, user_id, &symbol, side, price, amount);
 
-    // Register owner before matching so TradeFilled lookup always succeeds.
-    state.register_order_user(order_id, user_id);
+    // Register owner + symbol before matching so cancel and TradeFilled lookup always succeed.
+    state.register_order_user(order_id, user_id, symbol.clone());
 
     // --- Match (sync, engine write-locked, no async I/O inside) ---
+    let start = Instant::now();
     let trades = {
         let mut engine = state.engine.write();
         engine.match_order(order.clone())
             .map_err(|e| bad_request(&e.to_string()))?
     };
+    let match_latency_us = start.elapsed().as_secs_f64() * 1_000_000.0;
+    metrics::histogram!(
+        "cex_order_match_latency_us",
+        "symbol" => symbol.clone(),
+        "side" => side_label
+    )
+    .record(match_latency_us);
+    metrics::counter!(
+        "cex_orders_total",
+        "symbol" => symbol.clone(),
+        "side" => side_label
+    )
+    .increment(1);
     // Engine lock released here — async persistence and broadcasts happen below.
 
     // --- Persist: OrderPlaced MUST arrive before TradeFilled ---
@@ -126,26 +154,42 @@ pub async fn place_order(
     }).await;
 
     let trades_count = trades.len();
+    if trades_count > 0 {
+        metrics::counter!(
+            "cex_trades_total",
+            "symbol" => symbol.clone()
+        )
+        .increment(trades_count as u64);
+    }
     for trade in &trades {
         // Persist (clone Trade because PersistenceEvent takes ownership).
-        let maker_user_id = state.get_order_user(trade.maker_order_id).unwrap_or(0);
+        let maker_user_id = state.get_order_user(trade.maker_order_id)
+            .map(|(uid, _)| uid)
+            .unwrap_or(0);
         let _ = state.events.send(PersistenceEvent::TradeFilled {
             trade:         trade.clone(),
             maker_user_id,
             taker_user_id: user_id,
+            taker_side:    side,
             base_asset:    req.base_asset.clone(),
             quote_asset:   req.quote_asset.clone(),
         }).await;
 
         // Broadcast individual fill to WebSocket clients (synchronous, non-blocking).
         let _ = state.broadcast.send(WsEvent::TradeExecuted {
+            symbol: symbol.clone(),
             price:  trade.price.to_string(),
             amount: trade.amount.to_string(),
         });
     }
 
     // Broadcast a fresh depth snapshot so clients see the updated book.
-    broadcast_orderbook_snapshot(&state);
+    broadcast_orderbook_snapshot(&state, &symbol);
+    let active_symbols = {
+        let engine = state.engine.read();
+        engine.symbols().len() as f64
+    };
+    metrics::gauge!("cex_active_symbols").set(active_symbols);
 
     Ok((
         StatusCode::CREATED,
@@ -166,10 +210,37 @@ pub async fn cancel_order(
     UserId(user_id): UserId,
     Path(order_id): Path<u64>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    // --- Ownership check (no lock needed — order_users is a separate Mutex) ---
-    let owner_id = state
-        .get_order_user(order_id)
+    // --- Ownership + symbol resolution ---
+    // Fast path: in-memory map (hot path while process is alive)
+    // Fallback: DB lookup (covers stale rows after restart).
+    let (owner_id, symbol) = if let Some((owner_id, symbol)) = state.get_order_user(order_id) {
+        (owner_id, symbol)
+    } else {
+        let row: OpenOrderLookupRow = sqlx::query_as(
+            "SELECT user_id, base_asset, quote_asset
+             FROM orders_log
+             WHERE order_id = $1 AND status::text IN ('open', 'partial')",
+        )
+        .bind(order_id as i64)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("database error: {e}") })),
+            )
+        })?
         .ok_or_else(|| not_found("order not found"))?;
+
+        if row.user_id <= 0 {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "invalid order owner in database" })),
+            ));
+        }
+
+        (row.user_id as u64, format!("{}_{}", row.base_asset, row.quote_asset))
+    };
 
     if owner_id != user_id {
         return Err((
@@ -178,19 +249,28 @@ pub async fn cancel_order(
         ));
     }
 
-    // --- Cancel in engine (sync, write-locked) ---
+    // --- Cancel in engine if currently loaded (sync, write-locked) ---
+    // If not found in memory (e.g. after restart), continue and persist cancellation to DB.
     {
         let mut engine = state.engine.write();
-        engine
-            .cancel_order(order_id)
-            .map_err(|_| not_found("order not found or already filled"))?;
+        let _ = engine.cancel_order(&symbol, order_id);
     }
 
     // --- Persist async ---
     let _ = state.events.send(PersistenceEvent::OrderCancelled { order_id }).await;
+    metrics::counter!(
+        "cex_order_cancellations_total",
+        "symbol" => symbol.clone()
+    )
+    .increment(1);
 
     // --- Broadcast updated orderbook snapshot ---
-    broadcast_orderbook_snapshot(&state);
+    broadcast_orderbook_snapshot(&state, &symbol);
+    let active_symbols = {
+        let engine = state.engine.read();
+        engine.symbols().len() as f64
+    };
+    metrics::gauge!("cex_active_symbols").set(active_symbols);
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -199,13 +279,13 @@ pub async fn cancel_order(
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Snapshot the engine depth and broadcast an OrderbookUpdate event.
+/// Snapshot the engine depth for `symbol` and broadcast an OrderbookUpdate event.
 /// Acquires a read lock (not write), so this never contends with matching.
 /// Returns immediately if no WebSocket clients are connected.
-fn broadcast_orderbook_snapshot(state: &AppState) {
+fn broadcast_orderbook_snapshot(state: &AppState, symbol: &str) {
     let (raw_bids, raw_asks) = {
         let engine = state.engine.read();
-        engine.depth_snapshot(50)
+        engine.depth_snapshot(symbol, 50)
     };
 
     let to_level = |(price, amount): (Decimal, Decimal)| WsPriceLevel {
@@ -216,8 +296,9 @@ fn broadcast_orderbook_snapshot(state: &AppState) {
     // Err(SendError) is returned only when there are no active receivers;
     // this is normal during startup or when no clients are connected.
     let _ = state.broadcast.send(WsEvent::OrderbookUpdate {
-        bids: raw_bids.into_iter().map(to_level).collect(),
-        asks: raw_asks.into_iter().map(to_level).collect(),
+        symbol: symbol.to_owned(),
+        bids:   raw_bids.into_iter().map(to_level).collect(),
+        asks:   raw_asks.into_iter().map(to_level).collect(),
     });
 }
 
