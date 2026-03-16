@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{de::Error as _, Deserialize, Deserializer};
 
 use crate::poseidon::{poseidon_internal_hash, poseidon_leaf_hash};
 use crate::tree::HashBytes;
@@ -13,6 +13,7 @@ pub struct ProofStepPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct ProofPayload {
+    #[serde(deserialize_with = "deserialize_u64_from_string_or_number")]
     pub user_id: u64,
     pub leaf_balance: String,
     pub root_hash: String,
@@ -24,8 +25,38 @@ pub struct ProofPayload {
 pub struct PublicInputsPayload {
     pub expected_root_hash: String,
     pub expected_root_balance: String,
+    #[serde(default, deserialize_with = "deserialize_optional_u64_from_string_or_number")]
     pub expected_user_id: Option<u64>,
     pub expected_cold_wallet_assets: Option<String>,
+}
+
+fn deserialize_u64_from_string_or_number<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    parse_u64_value(&value).ok_or_else(|| D::Error::custom("expected u64 as number or decimal string"))
+}
+
+fn deserialize_optional_u64_from_string_or_number<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(v) => parse_u64_value(&v)
+            .map(Some)
+            .ok_or_else(|| D::Error::custom("expected optional u64 as number or decimal string")),
+    }
+}
+
+fn parse_u64_value(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(num) => num.as_u64(),
+        serde_json::Value::String(s) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    }
 }
 
 pub fn verify_proof_json(proof_json: &str, public_inputs_json: &str) -> bool {
@@ -237,5 +268,38 @@ mod tests {
         .to_string();
 
         assert!(!verify_proof_json(&proof_json, &public_inputs_json));
+    }
+
+    #[test]
+    fn verify_proof_json_accepts_string_user_id() {
+        let snapshots = vec![
+            BalanceSnapshot { user_id: 11, balance: dec!(4.25) },
+            BalanceSnapshot { user_id: 22, balance: dec!(8.5) },
+        ];
+
+        let tree = build_poseidon_merkle_sum_tree(&snapshots).expect("tree build must succeed");
+        let proof = tree.generate_proof(1).expect("proof generation must succeed");
+
+        let proof_json = json!({
+            "user_id": snapshots[1].user_id.to_string(),
+            "leaf_balance": snapshots[1].balance.to_string(),
+            "root_hash": hash_to_hex(&proof.root.hash),
+            "root_balance": proof.root.balance.to_string(),
+            "merkle_path": proof.path.iter().map(|step| json!({
+                "sibling_hash": hash_to_hex(&step.sibling_hash),
+                "sibling_balance": step.sibling_balance.to_string(),
+                "sibling_is_left": step.sibling_is_left,
+            })).collect::<Vec<_>>(),
+        })
+        .to_string();
+
+        let public_inputs_json = json!({
+            "expected_root_hash": hash_to_hex(&proof.root.hash),
+            "expected_root_balance": proof.root.balance.to_string(),
+            "expected_user_id": snapshots[1].user_id.to_string(),
+        })
+        .to_string();
+
+        assert!(verify_proof_json(&proof_json, &public_inputs_json));
     }
 }

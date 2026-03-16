@@ -3,7 +3,7 @@
   import { loadWasmVerifier, zkpVerify } from "../../lib/zkp-wasm";
 
   type ProofPayload = {
-    user_id: number;
+    user_id: string;
     leaf_balance: string;
     root_hash: string;
     root_balance: string;
@@ -11,7 +11,7 @@
     public_inputs?: {
       expected_root_hash: string;
       expected_root_balance: string;
-      expected_user_id?: number;
+      expected_user_id?: string;
       expected_cold_wallet_assets?: string;
     };
     solvency?: {
@@ -21,11 +21,21 @@
     };
   };
 
+  type RawProofPayload = {
+    user_id?: number | string;
+    leaf_balance?: string;
+    root_hash?: string;
+    root_balance?: string;
+    merkle_path?: unknown[];
+    public_inputs?: ProofPayload["public_inputs"];
+    solvency?: ProofPayload["solvency"];
+  };
+
   let proofData = $state("");
   let status = $state<"idle" | "fetching" | "verifying" | "valid" | "invalid" | "error">("idle");
   let errorMsg = $state("");
   let assetFilter = $state("USDT");
-  let coldWalletAssets = $state("1000000");
+  let coldWalletAssets = $state("500000000");
   let dropActive = $state(false);
 
   // ── Fetch proof from backend (/api/zkp/proof) ─────────────────────────────
@@ -106,26 +116,57 @@
     }
 
     // Parse and validate proof structure before invoking WASM.
-    let parsed: ProofPayload;
+    let rawParsed: RawProofPayload;
     try {
-      parsed = JSON.parse(proofData);
+      rawParsed = JSON.parse(proofData);
     } catch {
       status = "error";
       errorMsg = "Invalid JSON — could not parse proof data";
       return;
     }
 
-    if (
-      typeof parsed.user_id !== "number" ||
-      typeof parsed.leaf_balance !== "string" ||
-      typeof parsed.root_hash !== "string" ||
-      typeof parsed.root_balance !== "string" ||
-      !Array.isArray(parsed.merkle_path)
-    ) {
+    const missing: string[] = [];
+    if (rawParsed.user_id === undefined || rawParsed.user_id === null || rawParsed.user_id === "") missing.push("user_id");
+    if (typeof rawParsed.leaf_balance !== "string") missing.push("leaf_balance");
+    if (typeof rawParsed.root_hash !== "string") missing.push("root_hash");
+    if (typeof rawParsed.root_balance !== "string") missing.push("root_balance");
+    if (!Array.isArray(rawParsed.merkle_path)) missing.push("merkle_path");
+
+    if (missing.length > 0) {
       status = "invalid";
-      errorMsg = "Proof JSON missing required fields: user_id, leaf_balance, root_hash, root_balance, merkle_path";
+      errorMsg = `Proof JSON missing required fields: ${missing.join(", ")}`;
       return;
     }
+
+    const normalizedUserId = rawParsed.user_id;
+    const userIdIsValid =
+      (typeof normalizedUserId === "number" && Number.isSafeInteger(normalizedUserId) && normalizedUserId > 0) ||
+      (typeof normalizedUserId === "string" && /^\d+$/.test(normalizedUserId.trim()) && normalizedUserId.trim() !== "0");
+
+    if (!userIdIsValid) {
+      status = "invalid";
+      errorMsg = "Invalid user_id: expected positive u64 (safe number or numeric string)";
+      return;
+    }
+
+    const parsed: ProofPayload = {
+      user_id: String(normalizedUserId).trim(),
+      leaf_balance: rawParsed.leaf_balance!,
+      root_hash: rawParsed.root_hash!,
+      root_balance: rawParsed.root_balance!,
+      merkle_path: rawParsed.merkle_path!,
+      ...(rawParsed.public_inputs
+        ? {
+            public_inputs: {
+              ...rawParsed.public_inputs,
+              ...(rawParsed.public_inputs.expected_user_id !== undefined
+                ? { expected_user_id: String(rawParsed.public_inputs.expected_user_id).trim() }
+                : {}),
+            },
+          }
+        : {}),
+      ...(rawParsed.solvency ? { solvency: rawParsed.solvency } : {}),
+    };
 
     status = "verifying";
     errorMsg = "";
@@ -149,11 +190,15 @@
       // Cryptographic verification: re-computes the Merkle path using Poseidon
       // hash (BN-254 field) from the leaf up to the root and checks all hashes
       // and balance sums match the declared values.
-      const result = zkpVerify(proofData, publicInputsJson);
+      const result = zkpVerify(JSON.stringify(parsed), publicInputsJson);
 
       status = result ? "valid" : "invalid";
       if (!result) {
-        errorMsg = "Merkle path verification failed — the proof is cryptographically invalid";
+        if (parsed.solvency && !parsed.solvency.liabilities_leq_assets) {
+          errorMsg = "Solvency check failed — total liabilities exceed declared cold wallet assets";
+        } else {
+          errorMsg = "Merkle path verification failed — the proof is cryptographically invalid";
+        }
       }
     } catch (err: any) {
       status = "error";

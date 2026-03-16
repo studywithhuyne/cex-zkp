@@ -1,10 +1,8 @@
 import { derived, writable } from "svelte/store";
-
-import { selectedUserId } from "./appStore";
 import { fetchAuthMe, postLogin, postRegister } from "../lib/api/client";
 
 type AuthStoreState = {
-  userId: number | null;
+  userId: string | null;
   username: string | null;
   loading: boolean;
 };
@@ -19,8 +17,7 @@ const INITIAL_STATE: AuthStoreState = {
 
 const store = writable<AuthStoreState>(INITIAL_STATE);
 
-function setAuthenticated(userId: number, username: string) {
-  selectedUserId.set(userId);
+function setAuthenticated(userId: string, username: string) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ userId, username }));
   store.set({ userId, username, loading: false });
 }
@@ -45,7 +42,7 @@ export async function bootstrapAuth(): Promise<void> {
     }
 
     const parsed = JSON.parse(raw) as { userId?: unknown; username?: unknown };
-    if (typeof parsed.userId !== "number" || !Number.isInteger(parsed.userId) || parsed.userId <= 0) {
+    if (typeof parsed.userId !== "string" || !/^\d+$/.test(parsed.userId) || parsed.userId === "0") {
       clearAuth();
       return;
     }

@@ -58,6 +58,22 @@ impl Engine {
     pub fn symbols(&self) -> Vec<&str> {
         self.books.keys().map(String::as_str).collect()
     }
+
+    /// All currently resting orders for a user across all symbols.
+    pub fn open_orders_by_user(&self, user_id: u64) -> Vec<Order> {
+        let mut out = Vec::new();
+
+        for book in self.books.values() {
+            out.extend(
+                book.open_orders()
+                    .into_iter()
+                    .filter(|order| order.user_id == user_id),
+            );
+        }
+
+        out.sort_by_key(|order| std::cmp::Reverse(order.id));
+        out
+    }
 }
 
 impl Default for Engine {

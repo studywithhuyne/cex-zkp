@@ -87,6 +87,24 @@ impl OrderBook {
         (bids, asks)
     }
 
+    /// Return a cloned list of all resting orders currently in this book.
+    ///
+    /// The list preserves per-level FIFO order and price-level ordering
+    /// (bids high->low, asks low->high).
+    pub fn open_orders(&self) -> Vec<Order> {
+        let mut out = Vec::with_capacity(self.order_map.len());
+
+        for queue in self.bids.values() {
+            out.extend(queue.iter().cloned());
+        }
+
+        for queue in self.asks.values() {
+            out.extend(queue.iter().cloned());
+        }
+
+        out
+    }
+
     /// Insert a limit order into the book **without** attempting to match it.
     ///
     /// Use this to place a resting (passive) order directly. For incoming

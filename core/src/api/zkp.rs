@@ -25,7 +25,7 @@ pub struct ZkpProofStepDto {
 
 #[derive(Debug, Serialize)]
 pub struct ZkpProofResponse {
-    pub user_id: u64,
+    pub user_id: String,
     pub asset: String,
     pub snapshot_size: usize,
     pub leaf_index: usize,
@@ -41,7 +41,7 @@ pub struct ZkpProofResponse {
 pub struct ZkpPublicInputsDto {
     pub expected_root_hash: String,
     pub expected_root_balance: String,
-    pub expected_user_id: u64,
+    pub expected_user_id: String,
     pub expected_cold_wallet_assets: String,
 }
 
@@ -129,7 +129,7 @@ pub async fn proof_handler(
     let liabilities_leq_assets = total_liabilities <= cold_wallet_assets;
 
     Ok(Json(ZkpProofResponse {
-        user_id,
+        user_id: user_id.to_string(),
         asset,
         snapshot_size: tree.original_leaf_count(),
         leaf_index: proof.leaf_index,
@@ -140,7 +140,7 @@ pub async fn proof_handler(
         public_inputs: ZkpPublicInputsDto {
             expected_root_hash: hash_to_hex(&proof.root.hash),
             expected_root_balance: proof.root.balance.to_string(),
-            expected_user_id: user_id,
+            expected_user_id: user_id.to_string(),
             expected_cold_wallet_assets: cold_wallet_assets.to_string(),
         },
         solvency: ZkpSolvencyDto {

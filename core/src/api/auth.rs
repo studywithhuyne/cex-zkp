@@ -46,7 +46,7 @@ pub struct LoginRequest {
 
 #[derive(Serialize)]
 pub struct AuthResponse {
-    pub user_id: u64,
+    pub user_id: String,
     pub username: String,
     pub auth_mode: String,
     pub auth_header: String,
@@ -94,6 +94,8 @@ where
 
 type ApiError = (StatusCode, Json<Value>);
 
+const MAX_JS_SAFE_INTEGER_I64: i64 = 9_007_199_254_740_991;
+
 /// POST /api/auth/register
 ///
 /// Creates a new user with Argon2id-hashed password and initializes zero
@@ -116,12 +118,17 @@ pub async fn register_handler(
         .await
         .map_err(db_err)?;
 
-    let (next_id,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(id), 0) + 1 FROM users")
+    let (next_id,): (i64,) = sqlx::query_as(
+        "SELECT COALESCE(MAX(id), 0) + 1
+         FROM users
+         WHERE id > 0 AND id <= $1",
+    )
+        .bind(MAX_JS_SAFE_INTEGER_I64)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;
 
-    if next_id <= 0 {
+    if next_id <= 0 || next_id > MAX_JS_SAFE_INTEGER_I64 {
         return Err(internal("generated invalid user id"));
     }
 
@@ -286,7 +293,7 @@ fn verify_password(password: &str, password_hash: &str) -> Result<(), ApiError> 
 
 fn auth_response(user_id: u64, username: String) -> AuthResponse {
     AuthResponse {
-        user_id,
+        user_id: user_id.to_string(),
         username,
         auth_mode: "x-user-id".to_string(),
         auth_header: format!("x-user-id: {user_id}"),

@@ -6,6 +6,7 @@
 
   let orders = $state<OpenOrder[]>([]);
   let isLoading = $state(false);
+  let loadError = $state("");
   let cancellingId = $state<number | null>(null);
   let tableContainer = $state<HTMLDivElement | null>(null);
   let reloadTimer = $state<ReturnType<typeof setTimeout> | null>(null);
@@ -13,9 +14,17 @@
   let lastTopOrderId = $state<number | null>(null);
 
   async function loadOrders() {
+    const userId = $authState.userId;
+    if (!userId) {
+      orders = [];
+      loadError = "";
+      return;
+    }
+
     isLoading = true;
+    loadError = "";
     try {
-      const nextOrders = await fetchOpenOrders(($authState.userId!));
+      const nextOrders = await fetchOpenOrders(userId);
       const nextTopId = nextOrders[0]?.order_id ?? null;
       const hasNewTop = lastTopOrderId !== null && nextTopId !== null && nextTopId !== lastTopOrderId;
 
@@ -25,8 +34,9 @@
       if (hasNewTop && tableContainer) {
         tableContainer.scrollTo({ top: 0, behavior: "smooth" });
       }
-    } catch {
+    } catch (err: any) {
       orders = [];
+      loadError = err?.message ?? "Failed to load open orders";
     } finally {
       isLoading = false;
     }
@@ -42,7 +52,7 @@
   }
 
   $effect(() => {
-    void ($authState.userId!);
+    void $authState.userId;
     void loadOrders();
     scheduleReload();
   });
@@ -55,16 +65,33 @@
   });
 
   $effect(() => {
+    const onOrderPlaced = (event: Event) => {
+      const custom = event as CustomEvent<OpenOrder>;
+      const incoming = custom.detail;
+      if (!incoming || incoming.order_id == null) {
+        return;
+      }
+
+      const exists = orders.some((order) => order.order_id === incoming.order_id);
+      if (!exists) {
+        orders = [incoming, ...orders];
+        lastTopOrderId = incoming.order_id;
+      }
+      scheduleReload();
+    };
+
     const onOrdersChanged = () => {
       scheduleReload();
     };
 
+    window.addEventListener("orders:placed", onOrderPlaced as EventListener);
     window.addEventListener("orders:changed", onOrdersChanged);
     pollTimer = setInterval(() => {
       scheduleReload();
     }, 1500);
 
     return () => {
+      window.removeEventListener("orders:placed", onOrderPlaced as EventListener);
       window.removeEventListener("orders:changed", onOrdersChanged);
       if (pollTimer) {
         clearInterval(pollTimer);
@@ -97,7 +124,11 @@
   </div>
 
   <div class="flex-1 min-h-0">
-    {#if isLoading && orders.length === 0}
+    {#if loadError}
+      <div class="h-full flex items-center justify-center py-6 px-3 text-[10px] text-orange-400 uppercase tracking-widest text-center">
+        {loadError}
+      </div>
+    {:else if isLoading && orders.length === 0}
       <div class="h-full flex items-center justify-center py-6 text-[10px] text-slate-500 uppercase tracking-widest animate-pulse">Loading...</div>
     {:else if orders.length === 0}
       <div class="h-full flex items-center justify-center py-6 text-[10px] text-slate-600 uppercase tracking-widest">No open orders</div>

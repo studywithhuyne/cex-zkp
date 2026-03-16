@@ -38,7 +38,7 @@ export async function loadWasmVerifier(): Promise<void> {
  * @param proofJson       JSON string matching the /api/zkp/proof response:
  *                        { user_id, leaf_balance, root_hash, root_balance, merkle_path }
  * @param publicInputsJson JSON string with the claimed public state to verify against:
- *                        { expected_root_hash, expected_root_balance, expected_user_id? }
+ *                        { expected_root_hash, expected_root_balance, expected_user_id?: string }
  * @returns true  if the Merkle path re-computation matches the declared root.
  *          false if any hash or balance is inconsistent.
  */

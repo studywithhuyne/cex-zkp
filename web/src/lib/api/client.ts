@@ -2,7 +2,9 @@ const DEFAULT_HEADERS = {
   "Content-Type": "application/json",
 };
 
-export async function apiGet<T = unknown>(path: string, userId = 1): Promise<T> {
+type AuthUserId = string | number;
+
+export async function apiGet<T = unknown>(path: string, userId: AuthUserId = 1): Promise<T> {
   const response = await fetch(path, {
     method: "GET",
     headers: {
@@ -21,7 +23,7 @@ export async function apiGet<T = unknown>(path: string, userId = 1): Promise<T> 
 export async function apiPost<T = unknown>(
   path: string,
   body: unknown,
-  userId = 1,
+  userId: AuthUserId = 1,
 ): Promise<T> {
   const response = await fetch(path, {
     method: "POST",
@@ -40,7 +42,7 @@ export async function apiPost<T = unknown>(
   return response.json() as Promise<T>;
 }
 
-export async function apiDelete(path: string, userId = 1): Promise<void> {
+export async function apiDelete(path: string, userId: AuthUserId = 1): Promise<void> {
   const response = await fetch(path, {
     method: "DELETE",
     headers: { "x-user-id": String(userId) },
@@ -111,7 +113,7 @@ export type DepositResponse = {
 };
 
 export type AuthResponse = {
-  user_id: number;
+  user_id: string;
   username: string;
   auth_mode: string;
   auth_header: string;
@@ -123,22 +125,22 @@ export type BalanceDto = {
   locked: string;
 };
 
-export const fetchOpenOrders = (userId: number) =>
+export const fetchOpenOrders = (userId: AuthUserId) =>
   apiGet<OpenOrder[]>("/api/orders/open", userId);
 
 export const fetchRecentTrades = () =>
   apiGet<RecentTrade[]>("/api/trades/recent");
 
-export const fetchUserTrades = (userId: number) =>
+export const fetchUserTrades = (userId: AuthUserId) =>
   apiGet<UserTrade[]>("/api/trades/user", userId);
 
-export const fetchBalances = (userId: number) =>
+export const fetchBalances = (userId: AuthUserId) =>
   apiGet<BalanceDto[]>("/api/balances", userId);
 
-export const postDeposit = (userId: number, asset: string, amount: string) =>
+export const postDeposit = (userId: AuthUserId, asset: string, amount: string) =>
   apiPost<DepositResponse>("/api/deposit", { asset, amount }, userId);
 
-export const cancelOrder = (userId: number, orderId: number) =>
+export const cancelOrder = (userId: AuthUserId, orderId: number) =>
   apiDelete(`/api/orders/${orderId}`, userId);
 
 export const postLogin = (username: string, password: string) =>
@@ -147,5 +149,5 @@ export const postLogin = (username: string, password: string) =>
 export const postRegister = (username: string, password: string) =>
   apiPostPublic<AuthResponse>("/api/auth/register", { username, password });
 
-export const fetchAuthMe = (userId: number) =>
+export const fetchAuthMe = (userId: AuthUserId) =>
   apiGet<AuthResponse>("/api/auth/me", userId);

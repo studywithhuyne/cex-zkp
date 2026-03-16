@@ -41,6 +41,20 @@
       if (resp.ok) {
         resultMsg = `Success! Order ID: ${data.order_id || 'Matched'}`;
         isError = false;
+        if (data.order_id) {
+          const placedOrder = {
+            order_id: Number(data.order_id),
+            side,
+            price: String(price),
+            amount: String(amount),
+            filled: "0",
+            status: "open",
+            base_asset: "BTC",
+            quote_asset: "USDT",
+            created_at: new Date().toISOString(),
+          };
+          window.dispatchEvent(new CustomEvent("orders:placed", { detail: placedOrder }));
+        }
         window.dispatchEvent(new CustomEvent("orders:changed"));
         // Optionally clear form
         // price = "";

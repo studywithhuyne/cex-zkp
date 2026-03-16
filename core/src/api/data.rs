@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{auth::UserId, state::AppState},
-    db::schema::{Balance, Candle, OrderLog, TradeLog},
+    db::schema::{Balance, Candle, TradeLog},
+    engine::Side,
 };
 
 /// Number of price levels returned per side in the orderbook snapshot.
@@ -186,39 +187,45 @@ pub async fn open_orders_handler(
     State(state): State<AppState>,
     UserId(user_id): UserId,
 ) -> Result<Json<Vec<OpenOrderDto>>, (StatusCode, Json<serde_json::Value>)> {
-    let rows: Vec<OrderLog> = sqlx::query_as(
-        "SELECT id, order_id, user_id, side::text, price, amount, filled,
-                status::text, base_asset, quote_asset, created_at, updated_at
-         FROM orders_log
-         WHERE user_id = $1 AND status::text IN ('open', 'partial')
-         ORDER BY created_at DESC",
-    )
-    .bind(user_id as i64)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("database error: {e}") })),
-        )
-    })?;
+    let open_orders = {
+        let engine = state.engine.read();
+        engine.open_orders_by_user(user_id)
+    };
 
-    let dtos = rows
+    let dtos = open_orders
         .into_iter()
-        .map(|o| OpenOrderDto {
-            order_id:    o.order_id,
-            side:        o.side,
-            price:       o.price.to_string(),
-            amount:      o.amount.to_string(),
-            filled:      o.filled.to_string(),
-            status:      o.status,
-            base_asset:  o.base_asset,
-            quote_asset: o.quote_asset,
-            created_at:  o.created_at.to_rfc3339(),
+        .map(|order| {
+            let (base_asset, quote_asset) = split_symbol_assets(&order.symbol);
+            let filled = order.amount - order.remaining;
+            let status = if filled.is_zero() { "open" } else { "partial" };
+
+            OpenOrderDto {
+                order_id:    order.id as i64,
+                side:        match order.side {
+                    Side::Buy => "buy".to_string(),
+                    Side::Sell => "sell".to_string(),
+                },
+                price:       order.price.to_string(),
+                amount:      order.amount.to_string(),
+                filled:      filled.to_string(),
+                status:      status.to_string(),
+                base_asset,
+                quote_asset,
+                // In-memory orders don't carry DB timestamp; order_id is monotonic
+                // and already sorted newest-first in engine.open_orders_by_user.
+                created_at:  String::new(),
+            }
         })
         .collect();
 
     Ok(Json(dtos))
+}
+
+fn split_symbol_assets(symbol: &str) -> (String, String) {
+    match symbol.split_once('_') {
+        Some((base, quote)) => (base.to_string(), quote.to_string()),
+        None => (symbol.to_string(), String::new()),
+    }
 }
 
 /// GET /api/trades/recent — last 50 trades globally (public, no auth).
