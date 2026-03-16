@@ -14,6 +14,7 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 use crate::api::{auth::UserId, state::AppState};
+use crate::ledger::LedgerError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request / Response types
@@ -112,16 +113,32 @@ pub async fn deposit_handler(
     .map_err(db_err)?;
 
     match row {
-        Some((new_available,)) => Ok(Json(DepositResponse {
-            asset,
-            deposited:     amount.to_string(),
-            new_available: new_available.to_string(),
-        })),
+        Some((_db_available,)) => {
+            let new_available = state
+                .ledger
+                .lock()
+                .deposit(user_id, &asset, amount)
+                .map_err(internal_ledger_error)?;
+
+            Ok(Json(DepositResponse {
+                asset,
+                deposited:     amount.to_string(),
+                new_available: new_available.to_string(),
+            }))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "user/asset combination not found" })),
         )),
     }
+}
+
+#[inline]
+fn internal_ledger_error(err: LedgerError) -> ApiError {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({ "error": format!("ledger error: {err}") })),
+    )
 }
 
 /// GET /api/trades/user — personal trade history (as maker or taker).

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     api::{auth::UserId, state::AppState},
-    db::schema::{Balance, Candle, TradeLog},
+    db::schema::{Candle, TradeLog},
     engine::Side,
 };
 
@@ -116,6 +116,15 @@ pub struct CandleDto {
     pub volume: String,
 }
 
+#[derive(Serialize)]
+pub struct AveragePriceResponse {
+    pub symbol: String,
+    pub best_bid: Option<String>,
+    pub best_ask: Option<String>,
+    pub mid_price: Option<String>,
+    pub micro_price: Option<String>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Handlers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,31 +164,68 @@ pub async fn balances_handler(
     State(state): State<AppState>,
     UserId(user_id): UserId,
 ) -> Result<Json<Vec<BalanceDto>>, (StatusCode, Json<serde_json::Value>)> {
-    let rows: Vec<Balance> = sqlx::query_as(
-        "SELECT user_id, asset_symbol, available, locked, updated_at
-         FROM balances
-         WHERE user_id = $1",
-    )
-    .bind(user_id as i64)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("database error: {e}") })),
-        )
-    })?;
-
-    let dtos = rows
+    let dtos = state
+        .ledger
+        .lock()
+        .balances_for_user(user_id)
         .into_iter()
         .map(|b| BalanceDto {
-            asset:     b.asset_symbol,
-            available: b.available.to_string(),
+            asset:     b.asset,
+            available: b.free.to_string(),
             locked:    b.locked.to_string(),
         })
         .collect();
 
     Ok(Json(dtos))
+}
+
+/// GET /api/price/average?symbol=BTC_USDT
+///
+/// Computes current market averages from top-of-book levels:
+/// - mid_price   = (best_bid + best_ask) / 2
+/// - micro_price = liquidity-weighted top-book midpoint
+pub async fn average_price_handler(
+    State(state): State<AppState>,
+    Query(params): Query<OrderbookQuery>,
+) -> Json<AveragePriceResponse> {
+    let symbol = params
+        .symbol
+        .as_deref()
+        .unwrap_or("BTC_USDT")
+        .to_string();
+
+    let (bids, asks) = {
+        let engine = state.engine.read();
+        engine.depth_snapshot(&symbol, 1)
+    };
+
+    let best_bid = bids.first().map(|(p, _)| *p);
+    let best_ask = asks.first().map(|(p, _)| *p);
+
+    let mid_price = match (best_bid, best_ask) {
+        (Some(bid), Some(ask)) => Some(((bid + ask) / Decimal::from(2_u64)).round_dp(4)),
+        _ => None,
+    };
+
+    let micro_price = match (bids.first(), asks.first()) {
+        (Some((bid_price, bid_qty)), Some((ask_price, ask_qty))) => {
+            let denom = *bid_qty + *ask_qty;
+            if denom.is_zero() {
+                None
+            } else {
+                Some(((((*bid_price * *ask_qty) + (*ask_price * *bid_qty)) / denom)).round_dp(4))
+            }
+        }
+        _ => None,
+    };
+
+    Json(AveragePriceResponse {
+        symbol,
+        best_bid: best_bid.map(|v| v.to_string()),
+        best_ask: best_ask.map(|v| v.to_string()),
+        mid_price: mid_price.map(|v| v.to_string()),
+        micro_price: micro_price.map(|v| v.to_string()),
+    })
 }
 
 /// GET /api/orders/open — open and partially filled orders for the authenticated user.

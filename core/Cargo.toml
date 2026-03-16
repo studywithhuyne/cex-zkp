@@ -72,6 +72,8 @@ rand = "0.8"
 base64 = "0.22"
 # Hex encoding for API key IDs
 hex = "0.4"
+# Internal hashing for high-speed ledger identifiers (Pillar 2)
+blake3 = "1"
 
 # Internal ZKP crate (Merkle tree + circuit primitives)
 zkp = { path = "../zkp" }

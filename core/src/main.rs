@@ -24,7 +24,9 @@ async fn main() {
     tracing::info!("Persistence worker spawned (buffer={})", worker::WORKER_BUFFER);
 
     // ── Axum server ───────────────────────────────────────────────────────────
-    let app_state = AppState::new(db_pool, events_tx, metrics_handle);
+    let app_state = AppState::new(db_pool, events_tx, metrics_handle)
+        .await
+        .expect("Failed to bootstrap app state");
     let app = router::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")

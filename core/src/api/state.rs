@@ -10,11 +10,13 @@ use std::sync::{
 
 use parking_lot::{Mutex, RwLock};
 use metrics_exporter_prometheus::PrometheusHandle;
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::db::worker::PersistenceEvent;
 use crate::engine::Engine;
+use crate::ledger::{InMemoryLedger, LedgerError};
 
 use super::ws::{WsEvent, BROADCAST_CAPACITY};
 
@@ -43,6 +45,13 @@ pub struct AppState {
     /// Populated when an order is placed; entries are retained until server restart.
     pub order_users: Arc<Mutex<HashMap<u64, (u64, String)>>>,
 
+    /// In-memory wallet ledger (free/locked balances + order reservations).
+    pub ledger: Arc<Mutex<InMemoryLedger>>,
+
+    /// Last executed trade price per symbol. Used as a stable anchor for
+    /// order price-band checks to reduce quote-spam market skew.
+    pub last_trade_price: Arc<Mutex<HashMap<String, Decimal>>>,
+
     /// Broadcast sender for the WebSocket event bus.
     /// Each WebSocket connection clones a Receiver via `subscribe()`.
     /// `send` is synchronous and non-blocking; ignored if no active receivers.
@@ -53,17 +62,30 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(db: PgPool, events: mpsc::Sender<PersistenceEvent>, metrics: PrometheusHandle) -> Self {
+    pub async fn new(
+        db: PgPool,
+        events: mpsc::Sender<PersistenceEvent>,
+        metrics: PrometheusHandle,
+    ) -> Result<Self, sqlx::Error> {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CAPACITY);
-        Self {
+        let ledger = bootstrap_ledger(&db).await.map_err(|e| match e {
+            BootstrapLedgerError::Db(err) => err,
+            BootstrapLedgerError::InvalidSnapshot => {
+                sqlx::Error::Protocol("invalid balances snapshot for in-memory ledger".to_string())
+            }
+        })?;
+
+        Ok(Self {
             engine:        Arc::new(RwLock::new(Engine::new())),
             next_order_id: Arc::new(AtomicU64::new(1)),
             db,
             events,
             order_users:   Arc::new(Mutex::new(HashMap::new())),
+            ledger:        Arc::new(Mutex::new(ledger)),
+            last_trade_price: Arc::new(Mutex::new(HashMap::new())),
             broadcast:     broadcast_tx,
             metrics,
-        }
+        })
     }
 
     /// Atomically allocate the next order ID (monotonically increasing).
@@ -90,4 +112,35 @@ impl AppState {
     pub fn unregister_order_user(&self, order_id: u64) {
         self.order_users.lock().remove(&order_id);
     }
+
+    #[inline]
+    pub fn set_last_trade_price(&self, symbol: String, price: Decimal) {
+        self.last_trade_price.lock().insert(symbol, price);
+    }
+
+    #[inline]
+    pub fn get_last_trade_price(&self, symbol: &str) -> Option<Decimal> {
+        self.last_trade_price.lock().get(symbol).copied()
+    }
+}
+
+#[derive(Debug)]
+enum BootstrapLedgerError {
+    Db(sqlx::Error),
+    InvalidSnapshot,
+}
+
+async fn bootstrap_ledger(db: &PgPool) -> Result<InMemoryLedger, BootstrapLedgerError> {
+    let rows: Vec<(i64, String, Decimal, Decimal)> = sqlx::query_as(
+        "SELECT user_id, asset_symbol, available, locked
+         FROM balances",
+    )
+    .fetch_all(db)
+    .await
+    .map_err(BootstrapLedgerError::Db)?;
+
+    InMemoryLedger::from_rows(&rows).map_err(|e| match e {
+        LedgerError::InvalidUserId => BootstrapLedgerError::InvalidSnapshot,
+        _ => BootstrapLedgerError::InvalidSnapshot,
+    })
 }

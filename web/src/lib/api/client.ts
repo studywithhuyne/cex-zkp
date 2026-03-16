@@ -125,6 +125,14 @@ export type BalanceDto = {
   locked: string;
 };
 
+export type AveragePriceDto = {
+  symbol: string;
+  best_bid: string | null;
+  best_ask: string | null;
+  mid_price: string | null;
+  micro_price: string | null;
+};
+
 export const fetchOpenOrders = (userId: AuthUserId) =>
   apiGet<OpenOrder[]>("/api/orders/open", userId);
 
@@ -136,6 +144,9 @@ export const fetchUserTrades = (userId: AuthUserId) =>
 
 export const fetchBalances = (userId: AuthUserId) =>
   apiGet<BalanceDto[]>("/api/balances", userId);
+
+export const fetchAveragePrice = (symbol = "BTC_USDT") =>
+  apiGet<AveragePriceDto>(`/api/price/average?symbol=${encodeURIComponent(symbol)}`);
 
 export const postDeposit = (userId: AuthUserId, asset: string, amount: string) =>
   apiPost<DepositResponse>("/api/deposit", { asset, amount }, userId);

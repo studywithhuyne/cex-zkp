@@ -1,12 +1,33 @@
 <script lang="ts">
   import { connectionState } from '../../stores/appStore';
   import { authState } from '../../stores/authStore';
+  import { orderBook } from '../../stores/orderBookStore';
+  import { fetchAveragePrice } from '../../lib/api/client';
 
   let price = $state("");
   let amount = $state("");
   let isSubmitting = $state(false);
   let resultMsg = $state("");
   let isError = $state(false);
+  let midPrice = $state<string | null>(null);
+  let microPrice = $state<string | null>(null);
+
+  async function loadAveragePrice() {
+    try {
+      const avg = await fetchAveragePrice("BTC_USDT");
+      midPrice = avg.mid_price;
+      microPrice = avg.micro_price;
+    } catch {
+      midPrice = null;
+      microPrice = null;
+    }
+  }
+
+  $effect(() => {
+    void $orderBook.bids;
+    void $orderBook.asks;
+    void loadAveragePrice();
+  });
 
   async function submitOrder(side: "buy" | "sell") {
     if (!price || !amount) {
@@ -78,6 +99,17 @@
   <div class="mb-5 flex items-center justify-between">
     <h2 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">Trade Form</h2>
     <span class="mono text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">Spot  BTC/USDT</span>
+  </div>
+
+  <div class="mb-4 grid grid-cols-2 gap-2 text-center">
+    <div class="rounded-lg border border-slate-800 bg-slate-900/60 py-2 px-3">
+      <p class="text-[9px] uppercase tracking-widest text-slate-500">Mid Price</p>
+      <p class="mono text-sm font-semibold text-sky-300">{midPrice ?? "--"}</p>
+    </div>
+    <div class="rounded-lg border border-slate-800 bg-slate-900/60 py-2 px-3">
+      <p class="text-[9px] uppercase tracking-widest text-slate-500">Micro Price</p>
+      <p class="mono text-sm font-semibold text-fuchsia-300">{microPrice ?? "--"}</p>
+    </div>
   </div>
 
   <form class="flex-1 flex flex-col space-y-4">
