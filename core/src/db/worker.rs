@@ -18,6 +18,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 use tokio::sync::mpsc;
+use tokio::time::{Duration, Instant};
 use tracing::{error, info};
 
 use crate::engine::{Order, Side, Trade};
@@ -77,6 +78,12 @@ pub fn spawn_persistence_worker(
 /// Recommended channel buffer for typical CEX load.
 pub const WORKER_BUFFER: usize = 1_024;
 
+/// Max events per persistence flush.
+const WORKER_BATCH_SIZE: usize = 256;
+
+/// Max time to coalesce events before flushing.
+const WORKER_BATCH_MAX_WAIT_MS: u64 = 10;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Worker loop
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,92 +91,113 @@ pub const WORKER_BUFFER: usize = 1_024;
 async fn run_worker(pool: PgPool, mut rx: mpsc::Receiver<PersistenceEvent>) {
     info!("Persistence worker started");
 
-    while let Some(event) = rx.recv().await {
-        match event {
-            PersistenceEvent::OrderPlaced { order, base_asset, quote_asset } => {
-                if let Err(e) = insert_order(&pool, &order, &base_asset, &quote_asset).await {
-                    error!(error = ?e, order_id = order.id, "Failed to log order placement");
-                }
+    let mut batch = Vec::with_capacity(WORKER_BATCH_SIZE);
+    let mut channel_closed = false;
+
+    loop {
+        if batch.is_empty() {
+            match rx.recv().await {
+                Some(event) => batch.push(event),
+                None => break,
+            }
+        }
+
+        let deadline = Instant::now() + Duration::from_millis(WORKER_BATCH_MAX_WAIT_MS);
+        while batch.len() < WORKER_BATCH_SIZE {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
             }
 
-            PersistenceEvent::TradeFilled {
-                trade,
-                maker_user_id,
-                taker_user_id,
-                taker_side,
-                base_asset,
-                quote_asset,
-            } => {
-                // Insert the trade record first …
-                if let Err(e) = insert_trade(
-                    &pool,
-                    &trade,
-                    maker_user_id,
-                    taker_user_id,
-                    &base_asset,
-                    &quote_asset,
-                )
-                .await
-                {
-                    error!(error = ?e, maker = trade.maker_order_id, taker = trade.taker_order_id, "Failed to log trade");
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Ok(Some(event)) => batch.push(event),
+                Ok(None) => {
+                    channel_closed = true;
+                    break;
                 }
-
-                // … then update the filled counters on both sides.
-                if let Err(e) = apply_fill(&pool, trade.maker_order_id, trade.amount).await {
-                    error!(error = ?e, order_id = trade.maker_order_id, "Failed to update maker fill");
-                }
-                if let Err(e) = apply_fill(&pool, trade.taker_order_id, trade.amount).await {
-                    error!(error = ?e, order_id = trade.taker_order_id, "Failed to update taker fill");
-                }
-
-                // … finally update user balances (skip self-trades — net effect is zero).
-                if maker_user_id != taker_user_id {
-                    let (buyer_id, seller_id) = match taker_side {
-                        Side::Buy  => (taker_user_id, maker_user_id),
-                        Side::Sell => (maker_user_id, taker_user_id),
-                    };
-                    if let Err(e) = update_balances(
-                        &pool,
-                        buyer_id,
-                        seller_id,
-                        &base_asset,
-                        &quote_asset,
-                        trade.amount,
-                        trade.price,
-                    )
-                    .await
-                    {
-                        error!(error = ?e, buyer = buyer_id, seller = seller_id, "Failed to update balances after trade");
-                    }
-                }
-
-                // … finally aggregate into OHLCV candles for all standard intervals.
-                let symbol   = format!("{}_{}", base_asset, quote_asset);
-                let trade_ts = Utc::now();
-                for &(label, secs) in CANDLE_INTERVALS {
-                    let open_time = floor_to_interval_secs(trade_ts, secs);
-                    if let Err(e) = upsert_candle(
-                        &pool, &symbol, label, open_time, trade.price, trade.amount,
-                    )
-                    .await
-                    {
-                        error!(
-                            error = ?e, symbol = %symbol, interval = label,
-                            "Failed to upsert OHLCV candle"
-                        );
-                    }
-                }
+                Err(_) => break,
             }
+        }
 
-            PersistenceEvent::OrderCancelled { order_id } => {
-                if let Err(e) = mark_cancelled(&pool, order_id).await {
-                    error!(error = ?e, order_id, "Failed to log order cancellation");
-                }
-            }
+        flush_batch(&pool, &batch).await;
+        batch.clear();
+
+        if channel_closed {
+            break;
         }
     }
 
     info!("Persistence worker shut down (channel closed)");
+}
+
+async fn flush_batch(pool: &PgPool, batch: &[PersistenceEvent]) {
+    for event in batch {
+        if let Err(e) = process_event(pool, event).await {
+            error!(error = ?e, "Failed to persist event in batch");
+        }
+    }
+}
+
+async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sqlx::Error> {
+    match event {
+        PersistenceEvent::OrderPlaced { order, base_asset, quote_asset } => {
+            insert_order(pool, order, base_asset, quote_asset).await
+        }
+
+        PersistenceEvent::TradeFilled {
+            trade,
+            maker_user_id,
+            taker_user_id,
+            taker_side,
+            base_asset,
+            quote_asset,
+        } => {
+            // Insert the trade record first ...
+            insert_trade(
+                pool,
+                trade,
+                *maker_user_id,
+                *taker_user_id,
+                base_asset,
+                quote_asset,
+            )
+            .await?;
+
+            // ... then update the filled counters on both sides.
+            apply_fill(pool, trade.maker_order_id, trade.amount).await?;
+            apply_fill(pool, trade.taker_order_id, trade.amount).await?;
+
+            // ... finally update user balances (skip self-trades - net effect is zero).
+            if maker_user_id != taker_user_id {
+                let (buyer_id, seller_id) = match taker_side {
+                    Side::Buy => (*taker_user_id, *maker_user_id),
+                    Side::Sell => (*maker_user_id, *taker_user_id),
+                };
+                update_balances(
+                    pool,
+                    buyer_id,
+                    seller_id,
+                    base_asset,
+                    quote_asset,
+                    trade.amount,
+                    trade.price,
+                )
+                .await?;
+            }
+
+            // ... aggregate into OHLCV candles for all standard intervals.
+            let symbol = format!("{}_{}", base_asset, quote_asset);
+            let trade_ts = Utc::now();
+            for &(label, secs) in CANDLE_INTERVALS {
+                let open_time = floor_to_interval_secs(trade_ts, secs);
+                upsert_candle(pool, &symbol, label, open_time, trade.price, trade.amount).await?;
+            }
+
+            Ok(())
+        }
+
+        PersistenceEvent::OrderCancelled { order_id } => mark_cancelled(pool, *order_id).await,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
