@@ -28,8 +28,8 @@
         },
         body: JSON.stringify({
           side,
-          price,
-          amount,
+          price: String(price),
+          amount: String(amount),
           base_asset: "BTC",
           quote_asset: "USDT"
         })

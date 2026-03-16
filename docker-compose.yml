@@ -38,6 +38,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    # Port 3000 is also exposed for direct API access / debugging.
+    # Remove this mapping in a hardened production environment
+    # (traffic should only enter through the Nginx proxy on port 8080).
     ports:
       - "3000:3000"
     networks:
@@ -50,7 +59,8 @@ services:
     container_name: cex_web
     restart: always
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "8080:80"
     networks:

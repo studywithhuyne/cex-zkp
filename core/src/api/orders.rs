@@ -133,6 +133,7 @@ pub async fn place_order(
             trade:         trade.clone(),
             maker_user_id,
             taker_user_id: user_id,
+            taker_side:    side,
             base_asset:    req.base_asset.clone(),
             quote_asset:   req.quote_asset.clone(),
         }).await;

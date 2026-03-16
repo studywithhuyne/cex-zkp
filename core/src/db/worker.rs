@@ -42,6 +42,8 @@ pub enum PersistenceEvent {
         trade:         Trade,
         maker_user_id: u64,
         taker_user_id: u64,
+        /// Side of the TAKER order; determines buyer/seller for balance updates.
+        taker_side:    Side,
         base_asset:    String,
         quote_asset:   String,
     },
@@ -93,6 +95,7 @@ async fn run_worker(pool: PgPool, mut rx: mpsc::Receiver<PersistenceEvent>) {
                 trade,
                 maker_user_id,
                 taker_user_id,
+                taker_side,
                 base_asset,
                 quote_asset,
             } => {
@@ -116,6 +119,27 @@ async fn run_worker(pool: PgPool, mut rx: mpsc::Receiver<PersistenceEvent>) {
                 }
                 if let Err(e) = apply_fill(&pool, trade.taker_order_id, trade.amount).await {
                     error!(error = ?e, order_id = trade.taker_order_id, "Failed to update taker fill");
+                }
+
+                // … finally update user balances (skip self-trades — net effect is zero).
+                if maker_user_id != taker_user_id {
+                    let (buyer_id, seller_id) = match taker_side {
+                        Side::Buy  => (taker_user_id, maker_user_id),
+                        Side::Sell => (maker_user_id, taker_user_id),
+                    };
+                    if let Err(e) = update_balances(
+                        &pool,
+                        buyer_id,
+                        seller_id,
+                        &base_asset,
+                        &quote_asset,
+                        trade.amount,
+                        trade.price,
+                    )
+                    .await
+                    {
+                        error!(error = ?e, buyer = buyer_id, seller = seller_id, "Failed to update balances after trade");
+                    }
                 }
             }
 
@@ -250,6 +274,68 @@ async fn mark_cancelled(pool: &PgPool, order_id: u64) -> Result<(), sqlx::Error>
         "#,
     )
     .bind(order_id as i64)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// UPDATE balances for both sides of a completed trade.
+///
+/// Buyer  receives `amount` of base_asset  (BTC) and spends `amount * price` of quote_asset (USDT).
+/// Seller receives `amount * price` USDT   and spends `amount` BTC.
+async fn update_balances(
+    pool:           &PgPool,
+    buyer_user_id:  u64,
+    seller_user_id: u64,
+    base_asset:     &str,    // e.g. "BTC"
+    quote_asset:    &str,    // e.g. "USDT"
+    amount:         Decimal, // BTC quantity traded
+    price:          Decimal, // execution price
+) -> Result<(), sqlx::Error> {
+    let quote_amount = amount * price;
+
+    // Buyer gains BTC
+    sqlx::query(
+        "UPDATE balances SET available = available + $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(amount)
+    .bind(buyer_user_id as i64)
+    .bind(base_asset)
+    .execute(pool)
+    .await?;
+
+    // Buyer spends USDT
+    sqlx::query(
+        "UPDATE balances SET available = available - $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(quote_amount)
+    .bind(buyer_user_id as i64)
+    .bind(quote_asset)
+    .execute(pool)
+    .await?;
+
+    // Seller spends BTC
+    sqlx::query(
+        "UPDATE balances SET available = available - $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(amount)
+    .bind(seller_user_id as i64)
+    .bind(base_asset)
+    .execute(pool)
+    .await?;
+
+    // Seller gains USDT
+    sqlx::query(
+        "UPDATE balances SET available = available + $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3",
+    )
+    .bind(quote_amount)
+    .bind(seller_user_id as i64)
+    .bind(quote_asset)
     .execute(pool)
     .await?;
 

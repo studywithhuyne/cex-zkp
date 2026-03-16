@@ -80,7 +80,7 @@
           <ul class="space-y-2">
             {#each balances as bal}
               <li class="flex justify-between items-center bg-slate-800/20 px-2 py-1.5 rounded border border-slate-800/50">
-                <span class="text-sky-300 font-bold text-xs tracking-wider">{bal.asset_symbol}</span>
+                <span class="text-sky-300 font-bold text-xs tracking-wider">{bal.asset}</span>
                 <div class="text-right">
                   <div class="text-slate-200 text-xs mono">{parseFloat(bal.available).toFixed(2)} <span class="text-[9px] text-slate-500">AVAIL</span></div>
                   {#if parseFloat(bal.locked) > 0}

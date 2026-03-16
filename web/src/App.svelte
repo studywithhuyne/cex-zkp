@@ -6,6 +6,7 @@
   import OrderBookPanel from "./components/orderbook/OrderBookPanel.svelte";
   import TradeFormPanel from "./components/trade/TradeFormPanel.svelte";
   import ZkpVerifierPanel from "./components/zkp/ZkpVerifierPanel.svelte";
+  import SimulatorPanel from "./components/simulator/SimulatorPanel.svelte";
 
   onMount(() => {
     orderBook.connect();
@@ -28,6 +29,7 @@
 
     <div class="space-y-4 md:space-y-6">
       <TradeFormPanel />
+      <SimulatorPanel />
       <ZkpVerifierPanel />
     </div>
   </div>
