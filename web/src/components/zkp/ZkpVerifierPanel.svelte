@@ -313,7 +313,7 @@
         <div class="rounded-xl border border-slate-700/70 bg-slate-950/55 p-3 text-xs text-slate-300/90">
             <p class="mono uppercase tracking-[0.14em] text-slate-400">User Inclusion</p>
             {#if parsed}
-              <p class="mt-2">User ID: <span class="mono text-slate-100">{parsed.user_id}</span></p>
+              <p class="mt-2">User proof loaded</p>
               <p class="mt-1">Leaf Balance: <span class="mono text-slate-100">{parsed.leaf_balance}</span></p>
               <p class="mt-1">Merkle Path: <span class="mono text-slate-100">{parsed.merkle_path.length}</span></p>
             {:else}

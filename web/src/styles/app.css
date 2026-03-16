@@ -88,3 +88,21 @@ body {
     padding: 2rem 2rem;
   }
 }
+
+/* Make interactive controls show pointer cursor on hover for better affordance */
+button,
+input[type="button"],
+input[type="submit"],
+input[type="reset"],
+.selectable,
+.clickable,
+[role="button"],
+label[role="button"] {
+  cursor: pointer;
+}
+
+/* Ensure anchor links used as buttons also show pointer */
+a[href],
+a.button {
+  cursor: pointer;
+}

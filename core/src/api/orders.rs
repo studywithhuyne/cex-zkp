@@ -70,10 +70,22 @@ pub struct PlaceOrderRequest {
 }
 
 #[derive(Serialize)]
+pub struct UpdatedBalanceDto {
+    pub asset:     String,
+    pub available: String,
+    pub locked:    String,
+}
+
+#[derive(Serialize)]
 pub struct PlaceOrderResponse {
     pub order_id:     u64,
     /// Number of trades generated immediately (0 = order rested on the book).
     pub trades_count: usize,
+    /// How much of the order was matched immediately (0 if fully resting).
+    pub matched_amount: String,
+    /// Updated balances for the relevant assets after this order was processed.
+    /// Clients can use this to refresh the UI without an extra GET /api/balances.
+    pub updated_balances: Vec<UpdatedBalanceDto>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,9 +243,29 @@ pub async fn place_order(
     };
     metrics::gauge!("cex_active_symbols").set(active_symbols);
 
+    // Compute matched_amount: sum of all fill quantities.
+    let matched_amount: Decimal = trades.iter().map(|t| t.amount).sum();
+
+    // Read fresh balances for base + quote assets directly from the in-memory
+    // ledger (already updated synchronously above via apply_trade_fill).
+    // This lets the client update the UI in a single round-trip.
+    let updated_balances = {
+        let ledger = state.ledger.lock();
+        let snapshots = ledger.balances_for_user(user_id);
+        snapshots
+            .into_iter()
+            .filter(|b| b.asset == base_asset || b.asset == quote_asset)
+            .map(|b| UpdatedBalanceDto {
+                asset:     b.asset,
+                available: b.free.to_string(),
+                locked:    b.locked.to_string(),
+            })
+            .collect()
+    };
+
     Ok((
         StatusCode::CREATED,
-        Json(PlaceOrderResponse { order_id, trades_count }),
+        Json(PlaceOrderResponse { order_id, trades_count, matched_amount: matched_amount.to_string(), updated_balances }),
     ))
 }
 

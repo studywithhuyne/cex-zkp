@@ -154,6 +154,9 @@ export const fetchUserTrades = (userId: AuthUserId) =>
 export const fetchBalances = (userId: AuthUserId) =>
   apiGet<BalanceDto[]>("/api/balances", userId);
 
+export const fetchBalanceByAsset = (userId: AuthUserId, asset: string) =>
+  apiGet<BalanceDto>(`/api/balances/${encodeURIComponent(asset)}`, userId);
+
 export const fetchAveragePrice = (symbol = "BTC_USDT") =>
   apiGet<AveragePriceDto>(`/api/price/average?symbol=${encodeURIComponent(symbol)}`);
 

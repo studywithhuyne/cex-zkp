@@ -59,7 +59,7 @@
     <div class="flex items-center gap-3 shrink-0">
       {#if $authState.userId}
         <div class="mono rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5 text-xs text-slate-100">
-          {$authState.username} (ID: {$authState.userId})
+          {$authState.username}
         </div>
 
         <button

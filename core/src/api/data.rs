@@ -155,7 +155,38 @@ pub async fn orderbook_handler(
     })
 }
 
-/// GET /api/balances — all asset balances for the authenticated user.
+/// GET /api/balances/:asset — single asset balance for the authenticated user.
+///
+/// More efficient than fetching all balances when only one asset is needed.
+/// Returns 404 if the user has no balance record for the given asset.
+pub async fn balance_asset_handler(
+    State(state): State<AppState>,
+    UserId(user_id): UserId,
+    axum::extract::Path(asset): axum::extract::Path<String>,
+) -> Result<Json<BalanceDto>, (StatusCode, Json<serde_json::Value>)> {
+    let asset_upper = asset.trim().to_ascii_uppercase();
+
+    let balance = state
+        .ledger
+        .lock()
+        .balances_for_user(user_id)
+        .into_iter()
+        .find(|b| b.asset == asset_upper);
+
+    match balance {
+        Some(b) => Ok(Json(BalanceDto {
+            asset:     b.asset,
+            available: b.free.to_string(),
+            locked:    b.locked.to_string(),
+        })),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("no balance found for asset {asset_upper}") })),
+        )),
+    }
+}
+
+
 ///
 /// Reads from the `balances` table via an indexed primary-key lookup.
 /// Note: balances are updated asynchronously by the persistence worker,
