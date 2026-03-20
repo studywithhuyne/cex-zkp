@@ -6,18 +6,14 @@
     user_id: string;
     leaf_balance: string;
     root_hash: string;
-    root_balance: string;
     merkle_path: unknown[];
     public_inputs?: {
       expected_root_hash: string;
-      expected_root_balance: string;
       expected_user_id?: string;
-      expected_cold_wallet_assets?: string;
     };
     solvency?: {
-      total_liabilities: string;
-      cold_wallet_assets: string;
       liabilities_leq_assets: boolean;
+      verified_at?: string;
     };
   };
 
@@ -25,7 +21,6 @@
     user_id?: number | string;
     leaf_balance?: string;
     root_hash?: string;
-    root_balance?: string;
     merkle_path?: unknown[];
     public_inputs?: ProofPayload["public_inputs"];
     solvency?: ProofPayload["solvency"];
@@ -35,7 +30,6 @@
   let status = $state<"idle" | "fetching" | "verifying" | "valid" | "invalid" | "error">("idle");
   let errorMsg = $state("");
   let assetFilter = $state("USDT");
-  let coldWalletAssets = $state("500000000");
   let dropActive = $state(false);
 
   // ── Fetch proof from backend (/api/zkp/proof) ─────────────────────────────
@@ -44,7 +38,7 @@
     errorMsg = "";
     try {
       const res = await fetch(
-        `/api/zkp/proof?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent(coldWalletAssets)}`,
+        `/api/zkp/proof?asset=${encodeURIComponent(assetFilter)}`,
         {
         headers: { "x-user-id": ($authState.userId!).toString() }
         }
@@ -129,7 +123,6 @@
     if (rawParsed.user_id === undefined || rawParsed.user_id === null || rawParsed.user_id === "") missing.push("user_id");
     if (typeof rawParsed.leaf_balance !== "string") missing.push("leaf_balance");
     if (typeof rawParsed.root_hash !== "string") missing.push("root_hash");
-    if (typeof rawParsed.root_balance !== "string") missing.push("root_balance");
     if (!Array.isArray(rawParsed.merkle_path)) missing.push("merkle_path");
 
     if (missing.length > 0) {
@@ -153,7 +146,6 @@
       user_id: String(normalizedUserId).trim(),
       leaf_balance: rawParsed.leaf_balance!,
       root_hash: rawParsed.root_hash!,
-      root_balance: rawParsed.root_balance!,
       merkle_path: rawParsed.merkle_path!,
       ...(rawParsed.public_inputs
         ? {
@@ -182,9 +174,7 @@
         ? JSON.stringify(parsed.public_inputs)
         : JSON.stringify({
             expected_root_hash: parsed.root_hash,
-            expected_root_balance: parsed.root_balance,
             expected_user_id: parsed.user_id,
-            expected_cold_wallet_assets: coldWalletAssets,
           });
 
       // Cryptographic verification: re-computes the Merkle path using Poseidon
@@ -220,7 +210,7 @@
   </div>
 
   <div class="flex-1 flex flex-col space-y-4">
-    <div class="grid gap-2 md:grid-cols-[100px_1fr_1.2fr_auto] md:items-center">
+    <div class="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-center">
       <select
         bind:value={assetFilter}
         class="rounded border border-slate-700/80 bg-slate-900/80 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50 cursor-pointer"
@@ -228,13 +218,6 @@
         <option value="USDT">USDT</option>
         <option value="BTC">BTC</option>
       </select>
-
-      <input
-        type="text"
-        bind:value={coldWalletAssets}
-        placeholder="Cold wallet assets"
-        class="rounded border border-slate-700/80 bg-slate-900/80 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
-      />
 
       <button
         type="button"
@@ -273,7 +256,7 @@
           dropActive = false;
         }}
         ondrop={handleDrop}
-        placeholder={'Fetch from API, paste JSON payload, or upload proof file.\n\nRequired fields:\n  user_id, leaf_balance, root_hash, root_balance, merkle_path'}
+        placeholder={'Fetch from API, paste JSON payload, or upload proof file.\n\nRequired fields:\n  user_id, leaf_balance, root_hash, merkle_path'}
         class="mono mt-1 block w-full flex-1 min-h-36 resize-none rounded-xl border bg-slate-950/70 px-3 py-2 text-xs text-slate-300 outline-none transition hide-scrollbar placeholder:text-slate-600 {dropActive ? 'border-cyan-400/60 ring-1 ring-cyan-400/40' : 'border-slate-700/80 focus:border-cyan-500/50'}"
       ></textarea>
     </div>

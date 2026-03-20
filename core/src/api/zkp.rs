@@ -31,25 +31,21 @@ pub struct ZkpProofResponse {
     pub leaf_index: usize,
     pub leaf_balance: String,
     pub root_hash: String,
-    pub root_balance: String,
     pub merkle_path: Vec<ZkpProofStepDto>,
     pub public_inputs: ZkpPublicInputsDto,
-    pub solvency: ZkpSolvencyDto,
+    pub solvency: Option<ZkpSolvencyDto>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ZkpPublicInputsDto {
     pub expected_root_hash: String,
-    pub expected_root_balance: String,
     pub expected_user_id: String,
-    pub expected_cold_wallet_assets: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct ZkpSolvencyDto {
-    pub total_liabilities: String,
-    pub cold_wallet_assets: String,
     pub liabilities_leq_assets: bool,
+    pub verified_at: String,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -124,9 +120,11 @@ pub async fn proof_handler(
         })
         .collect();
 
-    let cold_wallet_assets = resolve_cold_wallet_assets(&asset, query.cold_wallet_assets.as_deref())?;
-    let total_liabilities = proof.root.balance;
-    let liabilities_leq_assets = total_liabilities <= cold_wallet_assets;
+    let solvency = resolve_cold_wallet_assets_optional(&asset, query.cold_wallet_assets.as_deref())?
+        .map(|cold_wallet_assets| ZkpSolvencyDto {
+            liabilities_leq_assets: proof.root.balance <= cold_wallet_assets,
+            verified_at: chrono::Utc::now().to_rfc3339(),
+        });
 
     Ok(Json(ZkpProofResponse {
         user_id: user_id.to_string(),
@@ -135,20 +133,28 @@ pub async fn proof_handler(
         leaf_index: proof.leaf_index,
         leaf_balance: proof.leaf.balance.to_string(),
         root_hash: hash_to_hex(&proof.root.hash),
-        root_balance: proof.root.balance.to_string(),
         merkle_path,
         public_inputs: ZkpPublicInputsDto {
             expected_root_hash: hash_to_hex(&proof.root.hash),
-            expected_root_balance: proof.root.balance.to_string(),
             expected_user_id: user_id.to_string(),
-            expected_cold_wallet_assets: cold_wallet_assets.to_string(),
         },
-        solvency: ZkpSolvencyDto {
-            total_liabilities: total_liabilities.to_string(),
-            cold_wallet_assets: cold_wallet_assets.to_string(),
-            liabilities_leq_assets,
-        },
+        solvency,
     }))
+}
+
+fn resolve_cold_wallet_assets_optional(
+    asset: &str,
+    query_value: Option<&str>,
+) -> Result<Option<Decimal>, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(raw) = query_value.map(str::trim).filter(|s| !s.is_empty()) {
+        return parse_decimal(raw, "invalid query param cold_wallet_assets").map(Some);
+    }
+
+    let env_key = format!("COLD_WALLET_ASSETS_{}", asset);
+    match std::env::var(&env_key) {
+        Ok(raw) => parse_decimal(raw.trim(), &format!("invalid env {env_key}")).map(Some),
+        Err(_) => Ok(None),
+    }
 }
 
 fn resolve_cold_wallet_assets(
@@ -202,9 +208,6 @@ pub struct ZkpSolvencyResponse {
     pub asset: String,
     pub snapshot_size: usize,
     pub root_hash: String,
-    pub root_balance: String,
-    pub total_liabilities: String,
-    pub cold_wallet_assets: String,
     pub liabilities_leq_assets: bool,
     pub verified_at: String,
 }
@@ -261,9 +264,6 @@ pub async fn solvency_handler(
         asset,
         snapshot_size: tree.original_leaf_count(),
         root_hash: hash_to_hex(&root.hash),
-        root_balance: root.balance.to_string(),
-        total_liabilities: total_liabilities.to_string(),
-        cold_wallet_assets: cold_wallet_assets.to_string(),
         liabilities_leq_assets,
         verified_at,
     }))

@@ -22,7 +22,6 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
     missing.push("user_id");
   if (typeof rawParsed.leaf_balance !== "string") missing.push("leaf_balance");
   if (typeof rawParsed.root_hash !== "string") missing.push("root_hash");
-  if (typeof rawParsed.root_balance !== "string") missing.push("root_balance");
   if (!Array.isArray(rawParsed.merkle_path)) missing.push("merkle_path");
 
   if (missing.length > 0) {
@@ -54,7 +53,6 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
     user_id: String(normalizedUserId).trim(),
     leaf_balance: rawParsed.leaf_balance!,
     root_hash: rawParsed.root_hash!,
-    root_balance: rawParsed.root_balance!,
     merkle_path: rawParsed.merkle_path!,
     ...(rawParsed.public_inputs
       ? {
@@ -77,13 +75,11 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
  * Loads the WASM module on first call (idempotent).
  *
  * @param parsed       A validated ProofPayload
- * @param coldWalletFallback  Fallback cold_wallet_assets value when public_inputs lacks one
  * @returns { valid: true } or { valid: false, reason: string }
  * @throws on WASM loading / instantiation failure
  */
 export async function runWasmVerification(
   parsed: ProofPayload,
-  coldWalletFallback?: string,
 ): Promise<{ valid: true } | { valid: false; reason: string }> {
   await loadWasmVerifier();
 
@@ -91,9 +87,7 @@ export async function runWasmVerification(
     ? JSON.stringify(parsed.public_inputs)
     : JSON.stringify({
         expected_root_hash: parsed.root_hash,
-        expected_root_balance: parsed.root_balance,
         expected_user_id: parsed.user_id,
-        expected_cold_wallet_assets: coldWalletFallback,
       });
 
   const result = zkpVerify(JSON.stringify(parsed), publicInputsJson);

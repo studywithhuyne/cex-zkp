@@ -7,9 +7,6 @@
     asset: string;
     snapshot_size: number;
     root_hash: string;
-    root_balance: string;
-    total_liabilities: string;
-    cold_wallet_assets: string;
     liabilities_leq_assets: boolean;
     verified_at: string;
   };
@@ -146,8 +143,6 @@
       <div class="rounded-xl border border-slate-700/70 bg-slate-950/55 p-3 text-xs text-slate-300/90 space-y-1.5">
         <p class="mono uppercase tracking-[0.14em] text-slate-400 mb-2">Solvency Report</p>
         <p>Asset: <span class="mono text-slate-100">{result.asset}</span></p>
-        <p>Total Liabilities: <span class="mono text-slate-100">{result.total_liabilities}</span></p>
-        <p>Cold Wallet Assets: <span class="mono text-slate-100">{result.cold_wallet_assets}</span></p>
         <p>Root Hash: <span class="mono text-slate-100 break-all text-[10px]">{result.root_hash}</span></p>
         <p>Snapshot Size: <span class="mono text-slate-100">{result.snapshot_size} users</span></p>
         <p class="mt-1 font-semibold {result.liabilities_leq_assets ? 'text-emerald-300' : 'text-rose-300'}">
