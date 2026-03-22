@@ -102,7 +102,7 @@ pub fn create_membership_snark(input: MembershipProofInput) -> Result<SnarkProof
     let params = membership_parameters();
 
     let mut rng = rand::thread_rng();
-    let proof = create_random_proof(circuit, &params, &mut rng)
+    let proof = create_random_proof(circuit, params, &mut rng)
         .map_err(|e| SnarkError::Groth16(e.to_string()))?;
 
     let pvk = prepare_verifying_key(&params.vk);

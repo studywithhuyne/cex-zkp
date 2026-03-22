@@ -9,8 +9,9 @@
   import TradePage from "./components/pages/TradePage.svelte";
   import WalletPage from "./components/pages/WalletPage.svelte";
   import ZkVerifyPage from "./components/pages/ZkVerifyPage.svelte";
+  import TestingPage from "./components/pages/TestingPage.svelte";
 
-  const AUTH_REQUIRED_ROUTES = new Set(["/trade", "/wallet", "/zk-verify"]);
+  const AUTH_REQUIRED_ROUTES = new Set(["/trade", "/wallet", "/zk-verify", "/testing"]);
 
   onMount(async () => {
     orderBook.connect();
@@ -55,6 +56,8 @@
       <WalletPage />
     {:else if $router === "/zk-verify"}
       <ZkVerifyPage />
+    {:else if $router === "/testing"}
+      <TestingPage />
     {/if}
   </main>
 </div>

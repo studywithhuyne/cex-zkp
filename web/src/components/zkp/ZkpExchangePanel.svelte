@@ -1,6 +1,9 @@
 <script lang="ts">
   import { authState } from '../../stores/authStore';
 
+  import { testingConfig } from '../../stores/testingStore';
+  const { coldWalletAssets } = testingConfig;
+
   const AUTO_REFRESH_MS = 10 * 60 * 1000; // 10 minutes
 
   type SolvencyResult = {
@@ -15,7 +18,6 @@
   let errorMsg = $state("");
   let result = $state<SolvencyResult | null>(null);
   let assetFilter = $state("USDT");
-  let coldWalletAssets = $state("500000000");
   let countdown = $state(AUTO_REFRESH_MS / 1000);
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -27,7 +29,7 @@
 
     try {
       const res = await fetch(
-        `/api/zkp/solvency?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent(coldWalletAssets)}`,
+        `/api/zkp/solvency?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent($coldWalletAssets)}`,
         { headers: { "x-user-id": ($authState.userId ?? 1).toString() } }
       );
       if (!res.ok) {
@@ -89,7 +91,7 @@
 
   <div class="flex-1 flex flex-col space-y-4">
     <!-- Controls -->
-    <div class="grid gap-2 md:grid-cols-[100px_1fr] md:items-center">
+    <div class="grid gap-2 md:grid-cols-[100px] md:items-center">
       <select
         bind:value={assetFilter}
         class="rounded border border-slate-700/80 bg-slate-900/80 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50 cursor-pointer"
@@ -97,13 +99,6 @@
         <option value="USDT">USDT</option>
         <option value="BTC">BTC</option>
       </select>
-
-      <input
-        type="text"
-        bind:value={coldWalletAssets}
-        placeholder="Cold wallet assets"
-        class="rounded border border-slate-700/80 bg-slate-900/80 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
-      />
     </div>
 
     <!-- Status board -->
