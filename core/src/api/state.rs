@@ -65,6 +65,10 @@ pub struct AppState {
 
     /// Prometheus exporter handle used by GET /metrics.
     pub metrics: PrometheusHandle,
+
+    /// Background simulator runtime state (testing mode).
+    /// The worker loop runs independently from browser sessions.
+    pub simulator: Arc<Mutex<SimulatorState>>,
 }
 
 impl AppState {
@@ -94,6 +98,7 @@ impl AppState {
             last_trade_price: Arc::new(Mutex::new(HashMap::new())),
             broadcast:     broadcast_tx,
             metrics,
+            simulator: Arc::new(Mutex::new(SimulatorState::default())),
         })
     }
 
@@ -135,6 +140,100 @@ impl AppState {
     #[inline]
     pub fn adjust_exchange_user_usdt(&self, delta: Decimal) {
         self.exchange_funds.lock().apply_user_delta(delta);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimulatorProfile {
+    Normal,
+    Fast,
+    Turbo,
+    Hyper,
+}
+
+impl SimulatorProfile {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SimulatorProfile::Normal => "normal",
+            SimulatorProfile::Fast => "fast",
+            SimulatorProfile::Turbo => "turbo",
+            SimulatorProfile::Hyper => "hyper",
+        }
+    }
+
+    /// Parse a profile from a string in a case-insensitive way.
+    /// Also accepts short aliases like `n`, `f`, `t`, `h`.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "normal" | "n" => Some(SimulatorProfile::Normal),
+            "fast" | "f" => Some(SimulatorProfile::Fast),
+            "turbo" | "t" => Some(SimulatorProfile::Turbo),
+            "hyper" | "h" => Some(SimulatorProfile::Hyper),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for SimulatorProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for SimulatorProfile {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        SimulatorProfile::parse(s).ok_or("invalid simulator profile")
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulatorPairStats {
+    pub orders: u64,
+    pub fills: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulatorState {
+    pub running: bool,
+    pub profile: SimulatorProfile,
+    pub ticks: u64,
+    pub total_orders: u64,
+    pub total_fills: u64,
+    pub pair_stats: HashMap<String, SimulatorPairStats>,
+}
+
+impl SimulatorState {
+    pub fn reset_counters(&mut self) {
+        self.ticks = 0;
+        self.total_orders = 0;
+        self.total_fills = 0;
+        for stats in self.pair_stats.values_mut() {
+            stats.orders = 0;
+            stats.fills = 0;
+        }
+    }
+}
+
+impl Default for SimulatorState {
+    fn default() -> Self {
+        let pair_stats = HashMap::from([
+            ("BTC_USDT".to_string(), SimulatorPairStats { orders: 0, fills: 0 }),
+            ("ETH_USDT".to_string(), SimulatorPairStats { orders: 0, fills: 0 }),
+            ("SOL_USDT".to_string(), SimulatorPairStats { orders: 0, fills: 0 }),
+            ("BNB_USDT".to_string(), SimulatorPairStats { orders: 0, fills: 0 }),
+        ]);
+
+        Self {
+            // Start automatically so simulator keeps running without browser interaction.
+            running: true,
+            profile: SimulatorProfile::Turbo,
+            ticks: 0,
+            total_orders: 0,
+            total_fills: 0,
+            pair_stats,
+        }
     }
 }
 

@@ -16,7 +16,7 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use super::{admin, auth, data, metrics, orders, wallet, ws, zkp, state::AppState};
+use super::{admin, auth, data, metrics, orders, simulator, wallet, ws, zkp, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -51,6 +51,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/transfer",      post(wallet::transfer_handler))
         .route("/api/trades/recent", get(data::recent_trades_handler))
         .route("/api/trades/user",   get(wallet::user_trades_handler))
+        // Testing simulator runtime controls (backend background loop)
+        .route("/api/simulator/status", get(simulator::simulator_status_handler))
+        .route("/api/simulator/start", post(simulator::simulator_start_handler))
+        .route("/api/simulator/stop", post(simulator::simulator_stop_handler))
+        .route("/api/simulator/reset", post(simulator::simulator_reset_handler))
+        .route("/api/simulator/profile", put(simulator::simulator_profile_handler))
         // OHLCV candlestick data for the chart
         .route("/api/candles",       get(data::candles_handler))
         // ZKP-05: solvency proof package for authenticated user

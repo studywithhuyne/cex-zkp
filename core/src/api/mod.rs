@@ -5,6 +5,7 @@ pub mod data;
 pub mod metrics;
 pub mod orders;
 pub mod router;
+pub mod simulator;
 pub mod state;
 pub mod wallet;
 pub mod ws;

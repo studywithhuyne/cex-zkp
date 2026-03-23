@@ -27,6 +27,8 @@ async fn main() {
     let app_state = AppState::new(db_pool, events_tx, metrics_handle)
         .await
         .expect("Failed to bootstrap app state");
+    let _simulator_handle = matching_engine::api::simulator::spawn_simulator_worker(app_state.clone());
+    tracing::info!("Background simulator worker spawned");
     let app = router::build_router(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")

@@ -201,6 +201,22 @@ export type LiveTickerDto = {
   quote_volume_24h: string;
 };
 
+export type SimProfileKey = "normal" | "fast" | "turbo" | "hyper";
+
+export type SimulatorPairStats = {
+  orders: number;
+  fills: number;
+};
+
+export type SimulatorStatus = {
+  running: boolean;
+  profile: SimProfileKey;
+  ticks: number;
+  total_orders: number;
+  total_fills: number;
+  pair_stats: Record<string, SimulatorPairStats>;
+};
+
 export const fetchOpenOrders = (userId: AuthUserId) =>
   apiGet<OpenOrder[]>("/api/orders/open", userId);
 
@@ -229,6 +245,21 @@ export const fetchCandles = (symbol: string, interval = "1d", limit = 1) =>
 
 export const fetchLiveTickers = (symbols: string[] = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]) =>
   apiGet<LiveTickerDto[]>(`/api/market/tickers/live?symbols=${encodeURIComponent(symbols.join(","))}`);
+
+export const fetchSimulatorStatus = () =>
+  apiGet<SimulatorStatus>("/api/simulator/status");
+
+export const startSimulator = (profile?: SimProfileKey) =>
+  apiPost("/api/simulator/start", profile ? { profile } : {});
+
+export const stopSimulator = () =>
+  apiPost("/api/simulator/stop", {});
+
+export const resetSimulator = () =>
+  apiPost("/api/simulator/reset", {});
+
+export const setSimulatorProfile = (profile: SimProfileKey) =>
+  apiPut("/api/simulator/profile", { profile });
 
 export const postDeposit = (userId: AuthUserId, asset: string, amount: string) =>
   apiPost<DepositResponse>("/api/deposit", { asset, amount }, userId);
