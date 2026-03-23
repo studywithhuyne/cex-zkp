@@ -2,8 +2,9 @@
 // Wallet-related handlers: mock deposit and personal trade history.
 //
 // Routes (registered in router.rs):
-//   POST /api/deposit      — add USDT funds to a user's balance (requires x-user-id)
-//   POST /api/withdraw     — withdraw USDT funds from a user's balance (requires x-user-id)
+//   POST /api/deposit      — add funds to a user's balance (requires x-user-id)
+//   POST /api/withdraw     — withdraw funds from a user's balance (requires x-user-id)
+//   POST /api/transfer     — transfer funds between assets for authenticated user
 //   GET  /api/trades/user  — personal trade history for the authenticated user
 
 use axum::{
@@ -45,6 +46,22 @@ pub struct WithdrawResponse {
     pub asset:         String,
     pub withdrawn:     String,
     pub new_available: String,
+}
+
+#[derive(Deserialize)]
+pub struct TransferRequest {
+    pub from_asset: String,
+    pub to_asset:   String,
+    pub amount:     String,
+}
+
+#[derive(Serialize)]
+pub struct TransferResponse {
+    pub from_asset:         String,
+    pub to_asset:           String,
+    pub transferred:        String,
+    pub new_from_available: String,
+    pub new_to_available:   String,
 }
 
 #[derive(Serialize)]
@@ -99,6 +116,7 @@ pub async fn deposit_handler(
     Json(body): Json<DepositRequest>,
 ) -> Result<Json<DepositResponse>, ApiError> {
     let asset = normalized_transfer_asset(body.asset.as_deref())?;
+    ensure_asset_exists(&state, &asset).await?;
 
     let amount: Decimal = body
         .amount
@@ -153,6 +171,7 @@ pub async fn withdraw_handler(
     Json(body): Json<WithdrawRequest>,
 ) -> Result<Json<WithdrawResponse>, ApiError> {
     let asset = normalized_transfer_asset(body.asset.as_deref())?;
+    ensure_asset_exists(&state, &asset).await?;
 
     let amount: Decimal = body
         .amount
@@ -215,6 +234,115 @@ pub async fn withdraw_handler(
             }
         }
     }
+}
+
+/// POST /api/transfer — transfer available balance between two assets.
+///
+/// This is a mock internal transfer in dev/test mode with 1:1 amount semantics.
+pub async fn transfer_handler(
+    State(state): State<AppState>,
+    UserId(user_id): UserId,
+    Json(body): Json<TransferRequest>,
+) -> Result<Json<TransferResponse>, ApiError> {
+    let from_asset = normalized_required_asset(&body.from_asset)?;
+    let to_asset = normalized_required_asset(&body.to_asset)?;
+
+    if from_asset == to_asset {
+        return Err(bad_request("from_asset and to_asset must be different"));
+    }
+
+    ensure_asset_exists(&state, &from_asset).await?;
+    ensure_asset_exists(&state, &to_asset).await?;
+
+    let amount: Decimal = body
+        .amount
+        .parse()
+        .map_err(|_| bad_request("amount must be a valid decimal string"))?;
+
+    if amount <= Decimal::ZERO {
+        return Err(bad_request("amount must be greater than 0"));
+    }
+
+    let mut tx = state.db.begin().await.map_err(db_err)?;
+
+    let from_row: Option<(Decimal,)> = sqlx::query_as(
+        "UPDATE balances
+         SET available = available - $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3 AND available >= $1
+         RETURNING available",
+    )
+    .bind(amount)
+    .bind(user_id as i64)
+    .bind(&from_asset)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    let (from_available_after,) = match from_row {
+        Some(row) => row,
+        None => {
+            tx.rollback().await.map_err(db_err)?;
+            let exists: Option<(i64,)> = sqlx::query_as(
+                "SELECT user_id
+                 FROM balances
+                 WHERE user_id = $1 AND asset_symbol = $2",
+            )
+            .bind(user_id as i64)
+            .bind(&from_asset)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(db_err)?;
+
+            if exists.is_some() {
+                return Err(bad_request("insufficient available balance"));
+            }
+
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "user/asset combination not found" })),
+            ));
+        }
+    };
+
+    let (to_available_after,): (Decimal,) = sqlx::query_as(
+        "UPDATE balances
+         SET available = available + $1, updated_at = now()
+         WHERE user_id = $2 AND asset_symbol = $3
+         RETURNING available",
+    )
+    .bind(amount)
+    .bind(user_id as i64)
+    .bind(&to_asset)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db_err)?;
+
+    tx.commit().await.map_err(db_err)?;
+
+    {
+        let mut ledger = state.ledger.lock();
+        ledger
+            .withdraw(user_id, &from_asset, amount)
+            .map_err(internal_ledger_error)?;
+        ledger
+            .deposit(user_id, &to_asset, amount)
+            .map_err(internal_ledger_error)?;
+    }
+
+    if from_asset == "USDT" {
+        state.adjust_exchange_user_usdt(-amount);
+    }
+    if to_asset == "USDT" {
+        state.adjust_exchange_user_usdt(amount);
+    }
+
+    Ok(Json(TransferResponse {
+        from_asset,
+        to_asset,
+        transferred: amount.to_string(),
+        new_from_available: from_available_after.to_string(),
+        new_to_available: to_available_after.to_string(),
+    }))
 }
 
 #[inline]
@@ -281,8 +409,42 @@ fn normalized_transfer_asset(asset: Option<&str>) -> Result<String, ApiError> {
         None => "USDT".to_string(),
     };
 
-    match normalized.as_str() {
-        "USDT" => Ok(normalized),
-        _ => Err(bad_request("asset must be USDT")),
+    validate_asset_symbol(&normalized)?;
+    Ok(normalized)
+}
+
+fn normalized_required_asset(asset: &str) -> Result<String, ApiError> {
+    let normalized = asset.trim().to_ascii_uppercase();
+    validate_asset_symbol(&normalized)?;
+    Ok(normalized)
+}
+
+fn validate_asset_symbol(asset: &str) -> Result<(), ApiError> {
+    if asset.len() < 2 || asset.len() > 16 {
+        return Err(bad_request("asset length must be between 2 and 16 characters"));
     }
+
+    if !asset.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return Err(bad_request("asset may only contain [A-Z0-9_]"));
+    }
+
+    Ok(())
+}
+
+async fn ensure_asset_exists(state: &AppState, asset: &str) -> Result<(), ApiError> {
+    let exists: Option<(String,)> = sqlx::query_as(
+        "SELECT symbol
+         FROM assets
+         WHERE symbol = $1",
+    )
+    .bind(asset)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(db_err)?;
+
+    if exists.is_none() {
+        return Err(bad_request("asset is not supported"));
+    }
+
+    Ok(())
 }

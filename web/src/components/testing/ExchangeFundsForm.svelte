@@ -4,14 +4,15 @@
   import { authState } from '../../stores/authStore';
   import { fetchUsers, postDeposit, postWithdraw, type UserListItem } from '../../lib/api/client';
   import { testingConfig } from '../../stores/testingStore';
+  import { SUPPORTED_MARKET_ASSETS } from '../../lib/marketMeta';
 
   const { coldWalletAssets } = testingConfig;
 
-  type TransferAsset = "USDT" | "BTC";
   type TransferAction = "deposit" | "withdraw";
+  const TRANSFER_ASSETS = ["USDT", ...SUPPORTED_MARKET_ASSETS.map((m) => m.symbol)];
 
   let targetUserId = $state("1");
-  let asset = $state<TransferAsset>("USDT");
+  let asset = $state("USDT");
   let amount = $state("");
   let isSubmitting = $state(false);
   let transferMessage = $state("");
@@ -128,8 +129,9 @@
             bind:value={asset}
             class="w-full rounded border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
           >
-            <option value="USDT">USDT</option>
-            <option value="BTC">BTC</option>
+            {#each TRANSFER_ASSETS as candidate}
+              <option value={candidate}>{candidate}</option>
+            {/each}
           </select>
         </label>
 
@@ -139,7 +141,7 @@
             type="text"
             inputmode="decimal"
             bind:value={amount}
-            placeholder={asset === "BTC" ? "0.5" : "10000"}
+            placeholder={asset === "USDT" ? "10000" : "0.5"}
             class="w-full rounded border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
           />
         </label>

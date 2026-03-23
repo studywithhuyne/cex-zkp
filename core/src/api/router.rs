@@ -47,6 +47,7 @@ pub fn build_router(state: AppState) -> Router {
         // Wallet: deposit and personal trade history
         .route("/api/deposit",       post(wallet::deposit_handler))
         .route("/api/withdraw",      post(wallet::withdraw_handler))
+        .route("/api/transfer",      post(wallet::transfer_handler))
         .route("/api/trades/recent", get(data::recent_trades_handler))
         .route("/api/trades/user",   get(wallet::user_trades_handler))
         // OHLCV candlestick data for the chart

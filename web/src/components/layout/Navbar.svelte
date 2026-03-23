@@ -12,7 +12,6 @@
   const AUTH_LINKS: { route: Route; label: string }[] = [
     { route: "/", label: "Markets" },
     { route: "/trade", label: "Trade" },
-    { route: "/wallet", label: "Wallet" },
     { route: "/zk-verify", label: "ZK Verify" },
   ];
 
@@ -35,7 +34,7 @@
   }
 </script>
 
-<nav class="terminal-panel px-4 py-3 sm:px-6">
+<nav class="terminal-panel relative z-90 overflow-visible px-4 py-3 sm:px-6">
   <div class="flex items-center justify-between gap-4">
     <!-- Brand -->
     <div class="flex items-center gap-3 shrink-0">
@@ -76,7 +75,7 @@
     <!-- User + Status -->
     <div class="flex items-center gap-3 shrink-0">
       {#if $authState.userId}
-        <div class="relative group/user-menu">
+        <div class="relative z-95 group/user-menu">
           <button
             type="button"
             class="mono rounded-lg border border-slate-700/80 bg-slate-900/80 px-2.5 py-1.5 text-xs text-slate-100 transition hover:border-slate-500"
@@ -85,7 +84,7 @@
           </button>
 
           <div
-            class="invisible absolute right-0 top-[calc(100%+0.45rem)] z-40 w-56 rounded-lg border border-slate-700/80 bg-slate-950/95 p-1.5 opacity-0 shadow-xl shadow-black/40 transition-all duration-150 group-hover/user-menu:visible group-hover/user-menu:opacity-100 group-focus-within/user-menu:visible group-focus-within/user-menu:opacity-100"
+            class="invisible absolute right-0 top-[calc(100%+0.45rem)] z-120 w-56 rounded-lg border border-slate-700/80 bg-slate-950/95 p-1.5 opacity-0 shadow-xl shadow-black/40 transition-all duration-150 group-hover/user-menu:visible group-hover/user-menu:opacity-100 group-focus-within/user-menu:visible group-focus-within/user-menu:opacity-100"
           >
             <div class="mb-1.5 rounded-md border border-slate-800 bg-slate-900/70 px-2 py-1.5">
               <p class="text-[10px] uppercase tracking-wider text-slate-500">Signed in</p>
@@ -95,7 +94,6 @@
 
             <a href="#/" class="block rounded-md px-2 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800/80 hover:text-sky-300">Dashboard</a>
             <a href="#/asset" class="block rounded-md px-2 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800/80 hover:text-sky-300">Asset</a>
-            <a href="#/wallet" class="block rounded-md px-2 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800/80 hover:text-sky-300">Wallet</a>
             <a href="#/trade-history" class="block rounded-md px-2 py-1.5 text-xs text-slate-300 transition hover:bg-slate-800/80 hover:text-sky-300">Trade History</a>
 
             <button

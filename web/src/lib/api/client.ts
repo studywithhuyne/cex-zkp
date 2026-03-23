@@ -140,6 +140,14 @@ export type WithdrawResponse = {
   new_available: string;
 };
 
+export type TransferResponse = {
+  from_asset: string;
+  to_asset: string;
+  transferred: string;
+  new_from_available: string;
+  new_to_available: string;
+};
+
 export type AuthResponse = {
   user_id: string;
   username: string;
@@ -213,6 +221,9 @@ export const postDeposit = (userId: AuthUserId, asset: string, amount: string) =
 
 export const postWithdraw = (userId: AuthUserId, asset: string, amount: string) =>
   apiPost<WithdrawResponse>("/api/withdraw", { asset, amount }, userId);
+
+export const postTransfer = (userId: AuthUserId, fromAsset: string, toAsset: string, amount: string) =>
+  apiPost<TransferResponse>("/api/transfer", { from_asset: fromAsset, to_asset: toAsset, amount }, userId);
 
 export const cancelOrder = (userId: AuthUserId, orderId: number) =>
   apiDelete(`/api/orders/${orderId}`, userId);
