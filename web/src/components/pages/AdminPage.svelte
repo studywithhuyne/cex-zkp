@@ -120,6 +120,7 @@
     try {
       await haltMarket(symbol);
       message = `Market ${symbol} halted successfully.`;
+      await loadAssets();
       setTimeout(() => message = null, 3000);
     } catch (e: any) {
       alert("Error: " + e.message);
@@ -256,7 +257,7 @@
                 </span>
               </td>
               <td class="py-2 px-3 text-right">
-                {#if asset.is_active && asset.symbol === "BTC"}
+                {#if asset.is_active && asset.symbol !== "USDT"}
                   <button class="text-xs bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded hover:bg-rose-500/30"
                           onclick={() => handleHaltMarket(`${asset.symbol}_USDT`)}>
                     Halt Market

@@ -36,6 +36,19 @@
     { key: "transfer", label: "Transfer" },
   ];
 
+  // Add coin icons here: put files in web/public/icons/coins and map by symbol.
+  const ASSET_ICONS: Record<string, string> = {
+    BTC: "/icons/coins/btc.svg",
+    ETH: "/icons/coins/eth.svg",
+    SOL: "/icons/coins/sol.svg",
+    BNB: "/icons/coins/bnb.svg",
+    USDT: "/icons/coins/usdt.svg",
+  };
+
+  function iconPath(symbol: string): string {
+    return ASSET_ICONS[symbol] ?? "/icons/coins/default.svg";
+  }
+
   function consumeActionIntent() {
     const raw = localStorage.getItem("asset_default_action");
     if (raw === "deposit" || raw === "withdraw" || raw === "transfer") {
@@ -184,12 +197,12 @@
       <div>
         <p class="mono text-xs uppercase tracking-[0.15em] text-slate-500">Estimated Balance</p>
         <div class="mt-2 flex items-end gap-3">
-          <p class="mono text-5xl font-bold text-slate-100">
+          <p class="mono text-4xl font-bold text-slate-100 lg:text-[2.6rem]">
             {parseFloat(availableOf(selectedAsset)).toLocaleString(undefined, { maximumFractionDigits: 8 })}
           </p>
           <select
             bind:value={selectedAsset}
-            class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-lg text-slate-200 outline-none focus:border-sky-500/50"
+            class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-base text-slate-200 outline-none focus:border-sky-500/50"
           >
             {#each viewAssets as asset}
               <option value={asset.symbol}>{asset.symbol}</option>
@@ -333,7 +346,7 @@
 
   <section class="terminal-panel-strong p-5">
     <div class="mb-3 flex items-center justify-between">
-      <h2 class="text-2xl font-bold tracking-wide text-slate-100 uppercase">My Assets</h2>
+      <h2 class="text-xl font-bold tracking-wide text-slate-100 uppercase">My Assets</h2>
       <span class="mono text-[12px] text-slate-500">{viewAssets.length} assets</span>
     </div>
 
@@ -343,7 +356,7 @@
       <div class="flex items-center justify-center py-8 text-[10px] text-slate-600 uppercase tracking-widest">No assets found</div>
     {:else}
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full text-xs sm:text-sm">
           <thead>
             <tr class="border-b border-slate-800/60 text-[11px] text-slate-500 uppercase tracking-wider">
               <th class="py-2 text-left">Coin</th>
@@ -355,7 +368,23 @@
           <tbody>
             {#each viewAssets as asset}
               <tr class="border-b border-slate-800/30 transition hover:bg-slate-800/20" onclick={() => (selectedAsset = asset.symbol)}>
-                <td class="py-2 font-semibold text-slate-200">{asset.symbol}</td>
+                <td class="py-2 font-semibold text-slate-200">
+                  <div class="flex items-center gap-2">
+                    <img
+                      src={iconPath(asset.symbol)}
+                      alt={asset.symbol}
+                      class="h-4 w-4 rounded-full object-cover"
+                      loading="lazy"
+                      onerror={(event) => {
+                        const target = event.currentTarget as HTMLImageElement;
+                        if (!target.src.endsWith('/icons/coins/default.svg')) {
+                          target.src = '/icons/coins/default.svg';
+                        }
+                      }}
+                    />
+                    <span>{asset.symbol}</span>
+                  </div>
+                </td>
                 <td class="py-2 text-right mono text-slate-200">{parseFloat(asset.available).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td class="py-2 text-right mono text-slate-400">{parseFloat(asset.locked).toLocaleString(undefined, { maximumFractionDigits: 8 })}</td>
                 <td class="py-2 text-right mono text-slate-100">

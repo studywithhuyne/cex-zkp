@@ -26,7 +26,7 @@ pub async fn admin_metrics_handler(
         .await
         .unwrap_or(0);
         
-    let active_orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders_log WHERE status IN ('open', 'partial_filled')")
+    let active_orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders_log WHERE status IN ('open', 'partial')")
         .fetch_one(&state.db)
         .await
         .unwrap_or(0);

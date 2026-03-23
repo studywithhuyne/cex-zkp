@@ -50,6 +50,7 @@ struct MarketRow {
     symbol: String,
     base_asset: String,
     quote_asset: String,
+    is_active: bool,
 }
 
 /// Maximum allowed deviation from reference price (in basis points).
@@ -451,8 +452,8 @@ async fn fetch_market_by_symbol(
     state: &AppState,
     symbol: &str,
 ) -> Result<MarketRow, (StatusCode, Json<serde_json::Value>)> {
-    sqlx::query_as::<_, MarketRow>(
-        "SELECT symbol, base_asset, quote_asset
+    let market = sqlx::query_as::<_, MarketRow>(
+        "SELECT symbol, base_asset, quote_asset, is_active
          FROM markets
          WHERE symbol = $1",
     )
@@ -465,7 +466,13 @@ async fn fetch_market_by_symbol(
             Json(serde_json::json!({ "error": format!("database error: {e}") })),
         )
     })?
-    .ok_or_else(|| not_found("market not found"))
+    .ok_or_else(|| not_found("market not found"))?;
+
+    if !market.is_active {
+        return Err(bad_request("market is halted"));
+    }
+
+    Ok(market)
 }
 
 fn validate_price_band(
