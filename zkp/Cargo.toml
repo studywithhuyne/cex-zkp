@@ -27,6 +27,11 @@ serde_json = "1"
 # Wasm bindings - compiled by wasm-pack for client-side verification
 wasm-bindgen = "0.2"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ark-groth16 = "0.3"
+ark-serialize = "0.3"
+base64 = "0.22"
+
 [dev-dependencies]
 # Property-based testing for the Merkle Sum Tree logic
 proptest = "1"

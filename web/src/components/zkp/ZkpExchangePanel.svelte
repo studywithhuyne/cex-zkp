@@ -1,5 +1,9 @@
 <script lang="ts">
   import { authState } from '../../stores/authStore';
+  import { SUPPORTED_ASSET_SYMBOLS } from '../../lib/marketMeta';
+
+  import { testingConfig } from '../../stores/testingStore';
+  const { coldWalletAssets } = testingConfig;
 
   const AUTO_REFRESH_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -7,9 +11,6 @@
     asset: string;
     snapshot_size: number;
     root_hash: string;
-    root_balance: string;
-    total_liabilities: string;
-    cold_wallet_assets: string;
     liabilities_leq_assets: boolean;
     verified_at: string;
   };
@@ -18,8 +19,6 @@
   let errorMsg = $state("");
   let result = $state<SolvencyResult | null>(null);
   let assetFilter = $state("USDT");
-  let coldWalletAssets = $state("500000000");
-  let autoRefresh = $state(true);
   let countdown = $state(AUTO_REFRESH_MS / 1000);
 
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -31,7 +30,7 @@
 
     try {
       const res = await fetch(
-        `/api/zkp/solvency?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent(coldWalletAssets)}`,
+        `/api/zkp/solvency?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent($coldWalletAssets)}`,
         { headers: { "x-user-id": ($authState.userId ?? 1).toString() } }
       );
       if (!res.ok) {
@@ -73,11 +72,7 @@
   }
 
   $effect(() => {
-    if (autoRefresh) {
-      startAutoRefresh();
-    } else {
-      stopAutoRefresh();
-    }
+    startAutoRefresh();
     return () => stopAutoRefresh();
   });
 </script>
@@ -97,26 +92,16 @@
 
   <div class="flex-1 flex flex-col space-y-4">
     <!-- Controls -->
-    <div class="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-center">
+    <div class="grid gap-2 md:grid-cols-[100px] md:items-center">
       <select
         bind:value={assetFilter}
         class="rounded border border-slate-700/80 bg-slate-900/80 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50 cursor-pointer"
       >
         <option value="USDT">USDT</option>
-        <option value="BTC">BTC</option>
+        {#each SUPPORTED_ASSET_SYMBOLS as symbol}
+          <option value={symbol}>{symbol}</option>
+        {/each}
       </select>
-
-      <input
-        type="text"
-        bind:value={coldWalletAssets}
-        placeholder="Cold wallet assets"
-        class="rounded border border-slate-700/80 bg-slate-900/80 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
-      />
-
-      <label class="flex items-center gap-2 cursor-pointer select-none text-xs text-slate-300">
-        <input type="checkbox" bind:checked={autoRefresh} class="accent-cyan-500" />
-        Auto (10m)
-      </label>
     </div>
 
     <!-- Status board -->
@@ -146,8 +131,6 @@
       <div class="rounded-xl border border-slate-700/70 bg-slate-950/55 p-3 text-xs text-slate-300/90 space-y-1.5">
         <p class="mono uppercase tracking-[0.14em] text-slate-400 mb-2">Solvency Report</p>
         <p>Asset: <span class="mono text-slate-100">{result.asset}</span></p>
-        <p>Total Liabilities: <span class="mono text-slate-100">{result.total_liabilities}</span></p>
-        <p>Cold Wallet Assets: <span class="mono text-slate-100">{result.cold_wallet_assets}</span></p>
         <p>Root Hash: <span class="mono text-slate-100 break-all text-[10px]">{result.root_hash}</span></p>
         <p>Snapshot Size: <span class="mono text-slate-100">{result.snapshot_size} users</span></p>
         <p class="mt-1 font-semibold {result.liabilities_leq_assets ? 'text-emerald-300' : 'text-rose-300'}">
@@ -158,7 +141,7 @@
     {/if}
 
     <!-- Auto-refresh countdown -->
-    {#if autoRefresh && status !== 'idle'}
+    {#if status !== 'idle'}
       <div class="text-center text-[10px] text-slate-500 mono">
         Next refresh in {formatCountdown(countdown)}
       </div>

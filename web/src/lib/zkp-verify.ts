@@ -1,6 +1,5 @@
-// zkp-verify.ts — Shared validation and WASM verification logic for ZKP panels.
+// zkp-verify.ts — Shared validation logic for SNARK-based ZKP panels.
 
-import { loadWasmVerifier, zkpVerify } from "./zkp-wasm";
 import type { ProofPayload, RawProofPayload } from "./zkp-types";
 
 type ValidationOk = { ok: true; payload: ProofPayload };
@@ -20,10 +19,10 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
   const missing: string[] = [];
   if (rawParsed.user_id === undefined || rawParsed.user_id === null || rawParsed.user_id === "")
     missing.push("user_id");
-  if (typeof rawParsed.leaf_balance !== "string") missing.push("leaf_balance");
   if (typeof rawParsed.root_hash !== "string") missing.push("root_hash");
-  if (typeof rawParsed.root_balance !== "string") missing.push("root_balance");
-  if (!Array.isArray(rawParsed.merkle_path)) missing.push("merkle_path");
+  if (!rawParsed.snark || typeof rawParsed.snark.verified !== "boolean") {
+    missing.push("snark.verified");
+  }
 
   if (missing.length > 0) {
     return {
@@ -52,10 +51,9 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
 
   const parsed: ProofPayload = {
     user_id: String(normalizedUserId).trim(),
-    leaf_balance: rawParsed.leaf_balance!,
     root_hash: rawParsed.root_hash!,
-    root_balance: rawParsed.root_balance!,
-    merkle_path: rawParsed.merkle_path!,
+    ...(typeof rawParsed.leaf_balance === "string" ? { leaf_balance: rawParsed.leaf_balance } : {}),
+    ...(rawParsed.snark ? { snark: rawParsed.snark } : {}),
     ...(rawParsed.public_inputs
       ? {
           public_inputs: {
@@ -73,30 +71,16 @@ export function validateProofJson(rawJson: string): ValidationOk | ValidationErr
 }
 
 /**
- * Run WASM-based Merkle path verification on a validated ProofPayload.
- * Loads the WASM module on first call (idempotent).
+ * Run SNARK verification result check on a validated ProofPayload.
  *
  * @param parsed       A validated ProofPayload
- * @param coldWalletFallback  Fallback cold_wallet_assets value when public_inputs lacks one
  * @returns { valid: true } or { valid: false, reason: string }
  * @throws on WASM loading / instantiation failure
  */
 export async function runWasmVerification(
   parsed: ProofPayload,
-  coldWalletFallback?: string,
 ): Promise<{ valid: true } | { valid: false; reason: string }> {
-  await loadWasmVerifier();
-
-  const publicInputsJson = parsed.public_inputs
-    ? JSON.stringify(parsed.public_inputs)
-    : JSON.stringify({
-        expected_root_hash: parsed.root_hash,
-        expected_root_balance: parsed.root_balance,
-        expected_user_id: parsed.user_id,
-        expected_cold_wallet_assets: coldWalletFallback,
-      });
-
-  const result = zkpVerify(JSON.stringify(parsed), publicInputsJson);
+  const result = parsed.snark?.verified === true;
 
   if (result) {
     return { valid: true };
@@ -110,6 +94,6 @@ export async function runWasmVerification(
   }
   return {
     valid: false,
-    reason: "Merkle path verification failed — the proof is cryptographically invalid",
+    reason: "zk-SNARK verification failed — the proof is cryptographically invalid",
   };
 }

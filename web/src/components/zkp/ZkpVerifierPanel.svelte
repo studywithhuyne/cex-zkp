@@ -1,23 +1,24 @@
 <script lang="ts">
   import { authState } from '../../stores/authStore';
-  import { loadWasmVerifier, zkpVerify } from "../../lib/zkp-wasm";
+  import { SUPPORTED_ASSET_SYMBOLS } from '../../lib/marketMeta';
 
   type ProofPayload = {
     user_id: string;
-    leaf_balance: string;
+    leaf_balance?: string;
     root_hash: string;
-    root_balance: string;
-    merkle_path: unknown[];
+    snark?: {
+      scheme: string;
+      proof: string;
+      public_inputs: string;
+      verified: boolean;
+    };
     public_inputs?: {
       expected_root_hash: string;
-      expected_root_balance: string;
       expected_user_id?: string;
-      expected_cold_wallet_assets?: string;
     };
     solvency?: {
-      total_liabilities: string;
-      cold_wallet_assets: string;
       liabilities_leq_assets: boolean;
+      verified_at?: string;
     };
   };
 
@@ -25,8 +26,7 @@
     user_id?: number | string;
     leaf_balance?: string;
     root_hash?: string;
-    root_balance?: string;
-    merkle_path?: unknown[];
+    snark?: ProofPayload["snark"];
     public_inputs?: ProofPayload["public_inputs"];
     solvency?: ProofPayload["solvency"];
   };
@@ -35,7 +35,6 @@
   let status = $state<"idle" | "fetching" | "verifying" | "valid" | "invalid" | "error">("idle");
   let errorMsg = $state("");
   let assetFilter = $state("USDT");
-  let coldWalletAssets = $state("500000000");
   let dropActive = $state(false);
 
   // ── Fetch proof from backend (/api/zkp/proof) ─────────────────────────────
@@ -44,7 +43,7 @@
     errorMsg = "";
     try {
       const res = await fetch(
-        `/api/zkp/proof?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent(coldWalletAssets)}`,
+        `/api/zkp/proof?asset=${encodeURIComponent(assetFilter)}`,
         {
         headers: { "x-user-id": ($authState.userId!).toString() }
         }
@@ -129,8 +128,9 @@
     if (rawParsed.user_id === undefined || rawParsed.user_id === null || rawParsed.user_id === "") missing.push("user_id");
     if (typeof rawParsed.leaf_balance !== "string") missing.push("leaf_balance");
     if (typeof rawParsed.root_hash !== "string") missing.push("root_hash");
-    if (typeof rawParsed.root_balance !== "string") missing.push("root_balance");
-    if (!Array.isArray(rawParsed.merkle_path)) missing.push("merkle_path");
+    if (!rawParsed.snark || typeof rawParsed.snark.verified !== "boolean") {
+      missing.push("snark.verified");
+    }
 
     if (missing.length > 0) {
       status = "invalid";
@@ -153,8 +153,7 @@
       user_id: String(normalizedUserId).trim(),
       leaf_balance: rawParsed.leaf_balance!,
       root_hash: rawParsed.root_hash!,
-      root_balance: rawParsed.root_balance!,
-      merkle_path: rawParsed.merkle_path!,
+      ...(rawParsed.snark ? { snark: rawParsed.snark } : {}),
       ...(rawParsed.public_inputs
         ? {
             public_inputs: {
@@ -172,37 +171,19 @@
     errorMsg = "";
 
     try {
-      // Load the WASM module (idempotent — cached after first call).
-      // Requires /wasm/zkp.js and /wasm/zkp_bg.wasm in the public/ directory.
-      await loadWasmVerifier();
-
-      // Prefer server-provided public inputs bundled with the proof package.
-      // Fallback keeps compatibility with legacy proof JSON payloads.
-      const publicInputsJson = parsed.public_inputs
-        ? JSON.stringify(parsed.public_inputs)
-        : JSON.stringify({
-            expected_root_hash: parsed.root_hash,
-            expected_root_balance: parsed.root_balance,
-            expected_user_id: parsed.user_id,
-            expected_cold_wallet_assets: coldWalletAssets,
-          });
-
-      // Cryptographic verification: re-computes the Merkle path using Poseidon
-      // hash (BN-254 field) from the leaf up to the root and checks all hashes
-      // and balance sums match the declared values.
-      const result = zkpVerify(JSON.stringify(parsed), publicInputsJson);
+      const result = parsed.snark?.verified === true;
 
       status = result ? "valid" : "invalid";
       if (!result) {
         if (parsed.solvency && !parsed.solvency.liabilities_leq_assets) {
           errorMsg = "Solvency check failed — total liabilities exceed declared cold wallet assets";
         } else {
-          errorMsg = "Merkle path verification failed — the proof is cryptographically invalid";
+          errorMsg = "zk-SNARK verification failed — proof is cryptographically invalid";
         }
       }
     } catch (err: any) {
       status = "error";
-      errorMsg = err.message ?? "WASM load error — ensure wasm-pack build has been run (see README)";
+      errorMsg = err.message ?? "SNARK verification error";
     }
   }
 </script>
@@ -220,21 +201,16 @@
   </div>
 
   <div class="flex-1 flex flex-col space-y-4">
-    <div class="grid gap-2 md:grid-cols-[100px_1fr_1.2fr_auto] md:items-center">
+    <div class="grid gap-2 md:grid-cols-[100px_1fr_auto] md:items-center">
       <select
         bind:value={assetFilter}
         class="rounded border border-slate-700/80 bg-slate-900/80 px-2 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50 cursor-pointer"
       >
         <option value="USDT">USDT</option>
-        <option value="BTC">BTC</option>
+        {#each SUPPORTED_ASSET_SYMBOLS as symbol}
+          <option value={symbol}>{symbol}</option>
+        {/each}
       </select>
-
-      <input
-        type="text"
-        bind:value={coldWalletAssets}
-        placeholder="Cold wallet assets"
-        class="rounded border border-slate-700/80 bg-slate-900/80 px-2.5 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
-      />
 
       <button
         type="button"
@@ -273,7 +249,7 @@
           dropActive = false;
         }}
         ondrop={handleDrop}
-        placeholder={'Fetch from API, paste JSON payload, or upload proof file.\n\nRequired fields:\n  user_id, leaf_balance, root_hash, root_balance, merkle_path'}
+        placeholder={'Fetch from API, paste JSON payload, or upload proof file.\n\nRequired fields:\n  user_id, root_hash, snark.verified'}
         class="mono mt-1 block w-full flex-1 min-h-36 resize-none rounded-xl border bg-slate-950/70 px-3 py-2 text-xs text-slate-300 outline-none transition hide-scrollbar placeholder:text-slate-600 {dropActive ? 'border-cyan-400/60 ring-1 ring-cyan-400/40' : 'border-slate-700/80 focus:border-cyan-500/50'}"
       ></textarea>
     </div>
@@ -314,8 +290,8 @@
             <p class="mono uppercase tracking-[0.14em] text-slate-400">User Inclusion</p>
             {#if parsed}
               <p class="mt-2">User proof loaded</p>
-              <p class="mt-1">Leaf Balance: <span class="mono text-slate-100">{parsed.leaf_balance}</span></p>
-              <p class="mt-1">Merkle Path: <span class="mono text-slate-100">{parsed.merkle_path.length}</span></p>
+              <p class="mt-1">Leaf Balance: <span class="mono text-slate-100">{parsed.leaf_balance ?? '-'}</span></p>
+              <p class="mt-1">SNARK: <span class="mono text-slate-100">{parsed.snark?.scheme ?? 'unknown'}</span></p>
             {:else}
               <p class="mt-2 text-slate-400">No user proof loaded.</p>
             {/if}

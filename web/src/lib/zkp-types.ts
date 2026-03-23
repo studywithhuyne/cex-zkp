@@ -2,20 +2,21 @@
 
 export type ProofPayload = {
   user_id: string;
-  leaf_balance: string;
+  leaf_balance?: string;
   root_hash: string;
-  root_balance: string;
-  merkle_path: unknown[];
+  snark?: {
+    scheme: string;
+    proof: string;
+    public_inputs: string;
+    verified: boolean;
+  };
   public_inputs?: {
     expected_root_hash: string;
-    expected_root_balance: string;
     expected_user_id?: string;
-    expected_cold_wallet_assets?: string;
   };
   solvency?: {
-    total_liabilities: string;
-    cold_wallet_assets: string;
     liabilities_leq_assets: boolean;
+    verified_at?: string;
   };
 };
 
@@ -23,8 +24,7 @@ export type RawProofPayload = {
   user_id?: number | string;
   leaf_balance?: string;
   root_hash?: string;
-  root_balance?: string;
-  merkle_path?: unknown[];
+  snark?: ProofPayload["snark"];
   public_inputs?: ProofPayload["public_inputs"];
   solvency?: ProofPayload["solvency"];
 };

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import WalletBalances from "../wallet/WalletBalances.svelte";
   import MockDepositForm from "../wallet/MockDepositForm.svelte";
+  import WalletBalances from "../wallet/WalletBalances.svelte";
   import TradeHistoryPanel from "../wallet/TradeHistoryPanel.svelte";
 </script>
 

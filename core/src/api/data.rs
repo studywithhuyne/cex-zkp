@@ -18,6 +18,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use reqwest::header::HeaderValue;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +53,13 @@ pub struct CandlesQuery {
     pub limit:    Option<i64>,
 }
 
+/// Query params for GET /api/market/tickers/live.
+#[derive(Deserialize)]
+pub struct LiveTickersQuery {
+    /// Comma-separated symbols, e.g. "BTCUSDT,ETHUSDT".
+    pub symbols: Option<String>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Response types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,6 +91,13 @@ pub struct BalanceDto {
 }
 
 #[derive(Serialize)]
+pub struct AssetDto {
+    pub symbol: String,
+    pub name: String,
+    pub decimals: i16,
+}
+
+#[derive(Serialize)]
 pub struct OpenOrderDto {
     pub order_id:    i64,
     pub side:        String,
@@ -97,6 +112,7 @@ pub struct OpenOrderDto {
 
 #[derive(Serialize)]
 pub struct RecentTradeDto {
+    pub market_symbol: String,
     pub price:       String,
     pub amount:      String,
     pub base_asset:  String,
@@ -123,6 +139,25 @@ pub struct AveragePriceResponse {
     pub best_ask: Option<String>,
     pub mid_price: Option<String>,
     pub micro_price: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct LiveTickerDto {
+    pub symbol: String,
+    pub last_price: String,
+    pub price_change_percent_24h: String,
+    pub quote_volume_24h: String,
+}
+
+#[derive(Deserialize)]
+struct BinanceTickerRaw {
+    symbol: String,
+    #[serde(rename = "lastPrice")]
+    last_price: String,
+    #[serde(rename = "priceChangePercent")]
+    price_change_percent_24h: String,
+    #[serde(rename = "quoteVolume")]
+    quote_volume_24h: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,6 +243,35 @@ pub async fn balances_handler(
         .collect();
 
     Ok(Json(dtos))
+}
+
+/// GET /api/assets — all supported assets configured in exchange.
+pub async fn assets_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AssetDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let rows: Vec<(String, String, i16)> = sqlx::query_as(
+        "SELECT symbol, name, decimals
+         FROM assets
+         ORDER BY symbol ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("database error: {e}") })),
+        )
+    })?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|(symbol, name, decimals)| AssetDto {
+                symbol,
+                name,
+                decimals,
+            })
+            .collect(),
+    ))
 }
 
 /// GET /api/price/average?symbol=BTC_USDT
@@ -312,7 +376,7 @@ pub async fn recent_trades_handler(
 ) -> Result<Json<Vec<RecentTradeDto>>, (StatusCode, Json<serde_json::Value>)> {
     let rows: Vec<TradeLog> = sqlx::query_as(
         "SELECT id, maker_order_id, taker_order_id, maker_user_id, taker_user_id,
-                price, amount, base_asset, quote_asset, executed_at
+                market_symbol, price, amount, executed_at
          FROM trades_log
          ORDER BY executed_at DESC
          LIMIT 50",
@@ -328,12 +392,16 @@ pub async fn recent_trades_handler(
 
     let dtos = rows
         .into_iter()
-        .map(|t| RecentTradeDto {
+        .map(|t| {
+            let (base_asset, quote_asset) = split_symbol_assets(&t.market_symbol);
+            RecentTradeDto {
+            market_symbol: t.market_symbol,
             price:       t.price.to_string(),
             amount:      t.amount.to_string(),
-            base_asset:  t.base_asset,
-            quote_asset: t.quote_asset,
+            base_asset,
+            quote_asset,
             executed_at: t.executed_at.to_rfc3339(),
+            }
         })
         .collect();
 
@@ -353,9 +421,9 @@ pub async fn candles_handler(
     let limit     = params.limit.unwrap_or(100).clamp(1, 500);
 
     let rows: Vec<Candle> = sqlx::query_as(
-        "SELECT symbol, interval, open_time, open, high, low, close, volume
+           "SELECT market_symbol, interval, open_time, open, high, low, close, volume
          FROM candles
-         WHERE symbol = $1 AND interval = $2
+            WHERE market_symbol = $1 AND interval = $2
          ORDER BY open_time DESC
          LIMIT $3",
     )
@@ -384,4 +452,93 @@ pub async fn candles_handler(
         .collect();
 
     Ok(Json(dtos))
+}
+
+/// GET /api/market/tickers/live?symbols=BTCUSDT,ETHUSDT
+///
+/// Proxies Binance 24h ticker API via backend so API keys are never exposed to frontend bundles.
+/// Uses env vars:
+/// - BINANCE_API_BASE_URL (default: https://api.binance.com/api/v3)
+/// - BINANCE_API_KEY (optional for public endpoints, included if provided)
+pub async fn live_tickers_handler(
+    Query(params): Query<LiveTickersQuery>,
+) -> Result<Json<Vec<LiveTickerDto>>, (StatusCode, Json<serde_json::Value>)> {
+    let base_url = std::env::var("BINANCE_API_BASE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "https://api.binance.com/api/v3".to_string());
+
+    let symbols: Vec<String> = params
+        .symbols
+        .as_deref()
+        .unwrap_or("BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_uppercase())
+        .collect();
+
+    if symbols.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "symbols must not be empty" })),
+        ));
+    }
+
+    let symbols_json = format!(
+        "[{}]",
+        symbols
+            .iter()
+            .map(|s| format!("\"{}\"", s))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+
+    let mut request = reqwest::Client::new()
+        .get(format!("{}/ticker/24hr", base_url.trim_end_matches('/')))
+        .query(&[("symbols", symbols_json)]);
+
+    if let Ok(key) = std::env::var("BINANCE_API_KEY") {
+        let k = key.trim();
+        if !k.is_empty() {
+            if let Ok(header_value) = HeaderValue::from_str(k) {
+                request = request.header("X-MBX-APIKEY", header_value);
+            }
+        }
+    }
+
+    let response = request.send().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": format!("failed to reach Binance: {e}") })),
+        )
+    })?;
+
+    if !response.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({
+                "error": format!("Binance returned status {}", response.status())
+            })),
+        ));
+    }
+
+    let raw: Vec<BinanceTickerRaw> = response.json().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": format!("invalid Binance response: {e}") })),
+        )
+    })?;
+
+    let out = raw
+        .into_iter()
+        .map(|t| LiveTickerDto {
+            symbol: t.symbol,
+            last_price: t.last_price,
+            price_change_percent_24h: t.price_change_percent_24h,
+            quote_volume_24h: t.quote_volume_24h,
+        })
+        .collect();
+
+    Ok(Json(out))
 }

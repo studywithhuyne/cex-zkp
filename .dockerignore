@@ -8,3 +8,11 @@
 web/dist
 .vscode
 .idea
+
+# Backend image only needs workspace manifests + core + zkp sources.
+web
+data
+docker
+docs
+scripts
+README.md

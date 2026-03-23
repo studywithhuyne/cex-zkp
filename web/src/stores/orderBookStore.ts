@@ -1,5 +1,6 @@
-import { writable } from "svelte/store";
+import { writable, get } from "svelte/store";
 import { connectionState } from "./appStore";
+import { selectedMarket } from "./marketStore";
 
 // WebSocket URL: dynamic so it works in both dev (Vite proxy on :5173) and Docker (Nginx on :8080).
 // Override via VITE_WS_URL env var if needed.
@@ -32,12 +33,12 @@ type WsApiPriceLevel = { price: string; amount: string };
 
 type WsOrderbookUpdate = {
   type: "orderbook_update";
-  data: { bids: WsApiPriceLevel[]; asks: WsApiPriceLevel[] };
+  data: { symbol: string; bids: WsApiPriceLevel[]; asks: WsApiPriceLevel[] };
 };
 
 type WsRecentTrade = {
   type: "recent_trade" | "trade_executed";
-  data: { price: string; amount: string };
+  data: { symbol: string; price: string; amount: string };
 };
 
 type WsApiMessage = WsOrderbookUpdate | WsRecentTrade;
@@ -53,6 +54,25 @@ function createOrderBookStore() {
 
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  async function loadSnapshot(symbol: string) {
+    try {
+      const res = await fetch(`/api/orderbook?symbol=${encodeURIComponent(symbol)}`);
+      if (!res.ok) {
+        return;
+      }
+
+      const data = await res.json();
+      update((state) => ({
+        ...state,
+        bids: (data.bids ?? []).map((b: any) => ({ price: parseFloat(b.price), amount: parseFloat(b.amount) })),
+        asks: (data.asks ?? []).map((a: any) => ({ price: parseFloat(a.price), amount: parseFloat(a.amount) })),
+        trades: [],
+      }));
+    } catch {
+      // no-op; websocket will still update when events arrive
+    }
+  }
 
   function connect() {
     if (socket && (socket.readyState === WebSocket.CONNECTING || socket.readyState === WebSocket.OPEN)) {
@@ -101,8 +121,11 @@ function createOrderBookStore() {
   }
 
   function handleMessage(msg: WsApiMessage) {
+    const currentMarket = get(selectedMarket);
+
     // orderbook_update: full depth snapshot after any book mutation
     if (msg.type === "orderbook_update") {
+      if (msg.data.symbol !== currentMarket) return;
       update(state => ({
         ...state,
         bids: msg.data.bids.map(b => ({ price: parseFloat(b.price), amount: parseFloat(b.amount) })),
@@ -113,6 +136,7 @@ function createOrderBookStore() {
 
     // recent_trade: single fill event
     if (msg.type === "recent_trade" || msg.type === "trade_executed") {
+      if (msg.data.symbol !== currentMarket) return;
       const trade: Trade = {
         price:  parseFloat(msg.data.price),
         amount: parseFloat(msg.data.amount),
@@ -138,10 +162,16 @@ function createOrderBookStore() {
     set(EMPTY_STATE);
   }
 
+  selectedMarket.subscribe((symbol) => {
+    set(EMPTY_STATE);
+    void loadSnapshot(symbol);
+  });
+
   return {
     subscribe,
     connect,
     disconnect,
+    clear: () => set(EMPTY_STATE),
   };
 }
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { orderBook } from "../../stores/orderBookStore";
+  import { selectedMarket } from "../../stores/marketStore";
   import { fetchRecentTrades } from "../../lib/api/client";
   import type { RecentTrade } from "../../lib/api/client";
 
@@ -16,14 +17,18 @@
 
   // Merge: WS trades first (realtime), then historical
   let displayTrades = $derived((() => {
+    const [base, quote] = $selectedMarket.split("_");
     const wsTrades = $orderBook.trades.map((t: { price: number; amount: number }) => ({
       price: String(t.price),
       amount: String(t.amount),
-      base_asset: "BTC",
-      quote_asset: "USDT",
+      base_asset: base,
+      quote_asset: quote,
       executed_at: new Date().toISOString(),
     }));
-    const combined = [...wsTrades, ...historicalTrades];
+    const historicalByMarket = historicalTrades.filter(
+      (t) => t.base_asset === base && t.quote_asset === quote,
+    );
+    const combined = [...wsTrades, ...historicalByMarket];
     return combined.slice(0, 50);
   })());
 

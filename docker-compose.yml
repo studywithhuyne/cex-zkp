@@ -35,6 +35,9 @@ services:
     environment:
       DATABASE_URL: postgres://admin:admin@db:5432/cex_db
       RUST_LOG: info
+      BINANCE_API_BASE_URL: ${BINANCE_API_BASE_URL:-https://api.binance.com/api/v3}
+      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
     depends_on:
       db:
         condition: service_healthy

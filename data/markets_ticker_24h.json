@@ -1,0 +1,30 @@
+﻿{
+    "fetched_at":  "2026-03-23T10:25:38Z",
+    "source":  "Binance REST API",
+    "markets":  [
+                    {
+                        "symbol":  "BTCUSDT",
+                        "last_price":  "68443.35000000",
+                        "price_change_percent_24h":  "-0.405",
+                        "quote_volume_24h":  "1131266137.98943550"
+                    },
+                    {
+                        "symbol":  "ETHUSDT",
+                        "last_price":  "2043.71000000",
+                        "price_change_percent_24h":  "-1.916",
+                        "quote_volume_24h":  "559877320.14929500"
+                    },
+                    {
+                        "symbol":  "SOLUSDT",
+                        "last_price":  "85.91000000",
+                        "price_change_percent_24h":  "-1.795",
+                        "quote_volume_24h":  "170522392.10458000"
+                    },
+                    {
+                        "symbol":  "BNBUSDT",
+                        "last_price":  "626.19000000",
+                        "price_change_percent_24h":  "-0.704",
+                        "quote_volume_24h":  "67868641.76976000"
+                    }
+                ]
+}

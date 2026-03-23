@@ -33,9 +33,8 @@ use crate::engine::{Order, Side, Trade};
 pub enum PersistenceEvent {
     /// A new limit order was submitted — log it as 'open' before any fills.
     OrderPlaced {
-        order:       Order,
-        base_asset:  String,
-        quote_asset: String,
+        order:         Order,
+        market_symbol: String,
     },
 
     /// A fill event from the matching engine.
@@ -46,8 +45,7 @@ pub enum PersistenceEvent {
         taker_user_id: u64,
         /// Side of the TAKER order; determines buyer/seller for balance updates.
         taker_side:    Side,
-        base_asset:    String,
-        quote_asset:   String,
+        market_symbol: String,
     },
 
     /// User cancelled their resting order.
@@ -140,8 +138,11 @@ async fn flush_batch(pool: &PgPool, batch: &[PersistenceEvent]) {
 
 async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sqlx::Error> {
     match event {
-        PersistenceEvent::OrderPlaced { order, base_asset, quote_asset } => {
-            insert_order(pool, order, base_asset, quote_asset).await
+        PersistenceEvent::OrderPlaced {
+            order,
+            market_symbol,
+        } => {
+            insert_order(pool, order, market_symbol).await
         }
 
         PersistenceEvent::TradeFilled {
@@ -149,19 +150,10 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
             maker_user_id,
             taker_user_id,
             taker_side,
-            base_asset,
-            quote_asset,
+            market_symbol,
         } => {
             // Insert the trade record first ...
-            insert_trade(
-                pool,
-                trade,
-                *maker_user_id,
-                *taker_user_id,
-                base_asset,
-                quote_asset,
-            )
-            .await?;
+            insert_trade(pool, trade, *maker_user_id, *taker_user_id, market_symbol).await?;
 
             // ... then update the filled counters on both sides.
             apply_fill(pool, trade.maker_order_id, trade.amount).await?;
@@ -169,6 +161,7 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
 
             // ... finally update user balances (skip self-trades - net effect is zero).
             if maker_user_id != taker_user_id {
+                let (base_asset, quote_asset) = split_market_symbol(market_symbol)?;
                 let (buyer_id, seller_id) = match taker_side {
                     Side::Buy => (*taker_user_id, *maker_user_id),
                     Side::Sell => (*maker_user_id, *taker_user_id),
@@ -177,8 +170,8 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
                     pool,
                     buyer_id,
                     seller_id,
-                    base_asset,
-                    quote_asset,
+                    &base_asset,
+                    &quote_asset,
                     trade.amount,
                     trade.price,
                 )
@@ -186,11 +179,11 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
             }
 
             // ... aggregate into OHLCV candles for all standard intervals.
-            let symbol = format!("{}_{}", base_asset, quote_asset);
             let trade_ts = Utc::now();
             for &(label, secs) in CANDLE_INTERVALS {
                 let open_time = floor_to_interval_secs(trade_ts, secs);
-                upsert_candle(pool, &symbol, label, open_time, trade.price, trade.amount).await?;
+                upsert_candle(pool, market_symbol, label, open_time, trade.price, trade.amount)
+                    .await?;
             }
 
             Ok(())
@@ -220,29 +213,38 @@ fn side_str(side: Side) -> &'static str {
     }
 }
 
+fn split_market_symbol(symbol: &str) -> Result<(String, String), sqlx::Error> {
+    match symbol.split_once('_') {
+        Some((base, quote)) if !base.is_empty() && !quote.is_empty() => {
+            Ok((base.to_string(), quote.to_string()))
+        }
+        _ => Err(sqlx::Error::Protocol(format!(
+            "invalid market symbol format: {symbol}"
+        ))),
+    }
+}
+
 /// INSERT INTO orders_log — idempotent via ON CONFLICT DO NOTHING.
 async fn insert_order(
-    pool:        &PgPool,
-    order:       &Order,
-    base_asset:  &str,
-    quote_asset: &str,
+    pool:          &PgPool,
+    order:         &Order,
+    market_symbol: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         INSERT INTO orders_log
-            (order_id, user_id, side, price, amount, filled, status, base_asset, quote_asset)
+            (order_id, user_id, market_symbol, side, price, amount, filled, status)
         VALUES
-            ($1, $2, $3::order_side, $4, $5, 0, 'open'::order_status, $6, $7)
+            ($1, $2, $3, $4::order_side, $5, $6, 0, 'open'::order_status)
         ON CONFLICT (order_id) DO NOTHING
         "#,
     )
     .bind(order.id      as i64)
     .bind(order.user_id as i64)
+    .bind(market_symbol)
     .bind(side_str(order.side))
     .bind(order.price)
     .bind(order.amount)
-    .bind(base_asset)
-    .bind(quote_asset)
     .execute(pool)
     .await?;
 
@@ -255,26 +257,24 @@ async fn insert_trade(
     trade:         &Trade,
     maker_user_id: u64,
     taker_user_id: u64,
-    base_asset:    &str,
-    quote_asset:   &str,
+    market_symbol: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         INSERT INTO trades_log
             (maker_order_id, taker_order_id, maker_user_id, taker_user_id,
-             price, amount, base_asset, quote_asset)
+             market_symbol, price, amount)
         VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8)
+            ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(trade.maker_order_id as i64)
     .bind(trade.taker_order_id as i64)
     .bind(maker_user_id as i64)
     .bind(taker_user_id as i64)
+    .bind(market_symbol)
     .bind(trade.price)
     .bind(trade.amount)
-    .bind(base_asset)
-    .bind(quote_asset)
     .execute(pool)
     .await?;
 
@@ -420,25 +420,25 @@ fn floor_to_interval_secs(time: DateTime<Utc>, interval_secs: i64) -> DateTime<U
 ///   - close = new price (last trade wins — sequential worker guarantees order)
 ///   - volume accumulates
 async fn upsert_candle(
-    pool:      &PgPool,
-    symbol:    &str,
-    interval:  &str,
-    open_time: DateTime<Utc>,
-    price:     Decimal,
-    amount:    Decimal,
+    pool:          &PgPool,
+    market_symbol: &str,
+    interval:      &str,
+    open_time:     DateTime<Utc>,
+    price:         Decimal,
+    amount:        Decimal,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
-        INSERT INTO candles (symbol, interval, open_time, open, high, low, close, volume)
+        INSERT INTO candles (market_symbol, interval, open_time, open, high, low, close, volume)
         VALUES ($1, $2, $3, $4, $4, $4, $4, $5)
-        ON CONFLICT (symbol, interval, open_time) DO UPDATE SET
+        ON CONFLICT (market_symbol, interval, open_time) DO UPDATE SET
             high   = GREATEST(candles.high,  EXCLUDED.high),
             low    = LEAST(candles.low,   EXCLUDED.low),
             close  = EXCLUDED.close,
             volume = candles.volume + EXCLUDED.volume
         "#,
     )
-    .bind(symbol)
+    .bind(market_symbol)
     .bind(interval)
     .bind(open_time)
     .bind(price)

@@ -2,6 +2,23 @@
 
 ## OPS Runtime (Docker Compose)
 
+### Environment setup
+
+```powershell
+# First time only
+Copy-Item .env.example .env
+
+# Then edit .env and set your real Binance credentials
+# BINANCE_API_KEY=...
+# BINANCE_API_SECRET=...
+```
+
+Notes:
+
+- `.env` is ignored by git and must not be pushed.
+- Frontend does not call Binance directly anymore; it consumes backend proxy endpoint `/api/market/tickers/live`.
+- Binance credentials are read server-side from env (`BINANCE_API_BASE_URL`, `BINANCE_API_KEY`, `BINANCE_API_SECRET`).
+
 This repository now includes a full local runtime stack:
 
 - `db`: PostgreSQL 17 (`cex_postgres`)
@@ -11,6 +28,8 @@ This repository now includes a full local runtime stack:
 ### Start all services
 
 ```powershell
+# If migration files changed (especially 0001), reset persisted DB metadata first
+docker compose down -v
 docker compose up -d --build
 docker compose ps
 ```

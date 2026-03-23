@@ -42,8 +42,15 @@ use crate::{
 #[derive(Debug, sqlx::FromRow)]
 struct OpenOrderLookupRow {
     user_id: i64,
+    market_symbol: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct MarketRow {
+    symbol: String,
     base_asset: String,
     quote_asset: String,
+    is_active: bool,
 }
 
 /// Maximum allowed deviation from reference price (in basis points).
@@ -64,9 +71,10 @@ pub struct PlaceOrderRequest {
     /// Limit price, e.g. "100.50"
     pub price:       String,
     /// Order quantity, e.g. "0.5"
-    pub amount:      String,
-    pub base_asset:  String,
-    pub quote_asset: String,
+    pub amount:        String,
+    pub market_symbol: Option<String>,
+    pub base_asset:    Option<String>,
+    pub quote_asset:   Option<String>,
 }
 
 #[derive(Serialize)]
@@ -120,21 +128,14 @@ pub async fn place_order(
     let amount = Decimal::from_str(&req.amount)
         .map_err(|_| bad_request("amount must be a valid decimal number"))?;
 
-    // --- Validate ---
-    let base_asset = req.base_asset.trim().to_ascii_uppercase();
-    let quote_asset = req.quote_asset.trim().to_ascii_uppercase();
-
-    if base_asset.is_empty() {
-        return Err(bad_request("base_asset must not be empty"));
-    }
-    if quote_asset.is_empty() {
-        return Err(bad_request("quote_asset must not be empty"));
-    }
+    // --- Resolve/validate market from DB ---
+    let market = resolve_market(&state, &req).await?;
+    let symbol = market.symbol.clone();
+    let base_asset = market.base_asset;
+    let quote_asset = market.quote_asset;
 
     // --- Allocate ID and build Order ---
     let order_id = state.alloc_order_id();
-    // Derive canonical symbol from base/quote pair (e.g. "BTC_USDT").
-    let symbol   = format!("{}_{}", base_asset, quote_asset);
     let side_label = match side {
         Side::Buy => "buy",
         Side::Sell => "sell",
@@ -198,9 +199,8 @@ pub async fn place_order(
 
     // --- Persist: OrderPlaced MUST arrive before TradeFilled ---
     let _ = state.events.send(PersistenceEvent::OrderPlaced {
-        order:       order.clone(),
-        base_asset:  base_asset.clone(),
-        quote_asset: quote_asset.clone(),
+        order:         order.clone(),
+        market_symbol: symbol.clone(),
     }).await;
 
     let trades_count = trades.len();
@@ -221,8 +221,7 @@ pub async fn place_order(
             maker_user_id,
             taker_user_id: user_id,
             taker_side:    side,
-            base_asset:    base_asset.clone(),
-            quote_asset:   quote_asset.clone(),
+            market_symbol: symbol.clone(),
         }).await;
 
         // Broadcast individual fill to WebSocket clients (synchronous, non-blocking).
@@ -289,7 +288,7 @@ pub async fn cancel_order(
         (owner_id, symbol)
     } else {
         let row: OpenOrderLookupRow = sqlx::query_as(
-            "SELECT user_id, base_asset, quote_asset
+            "SELECT user_id, market_symbol
              FROM orders_log
              WHERE order_id = $1 AND status::text IN ('open', 'partial')",
         )
@@ -311,7 +310,7 @@ pub async fn cancel_order(
             ));
         }
 
-        (row.user_id as u64, format!("{}_{}", row.base_asset, row.quote_asset))
+        (row.user_id as u64, row.market_symbol)
     };
 
     if owner_id != user_id {
@@ -412,6 +411,68 @@ fn reference_price_for_symbol(state: &AppState, symbol: &str) -> Option<Decimal>
         (None, Some(ask)) => Some(ask),
         (None, None) => None,
     }
+}
+
+async fn resolve_market(
+    state: &AppState,
+    req: &PlaceOrderRequest,
+) -> Result<MarketRow, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(symbol_raw) = req.market_symbol.as_deref() {
+        let symbol = symbol_raw.trim().to_ascii_uppercase();
+        if symbol.is_empty() {
+            return Err(bad_request("market_symbol must not be empty"));
+        }
+        return fetch_market_by_symbol(state, &symbol).await;
+    }
+
+    let base_asset = req
+        .base_asset
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let quote_asset = req
+        .quote_asset
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_ascii_uppercase();
+
+    if base_asset.is_empty() || quote_asset.is_empty() {
+        return Err(bad_request(
+            "provide market_symbol or both base_asset and quote_asset",
+        ));
+    }
+
+    let symbol = format!("{}_{}", base_asset, quote_asset);
+    fetch_market_by_symbol(state, &symbol).await
+}
+
+async fn fetch_market_by_symbol(
+    state: &AppState,
+    symbol: &str,
+) -> Result<MarketRow, (StatusCode, Json<serde_json::Value>)> {
+    let market = sqlx::query_as::<_, MarketRow>(
+        "SELECT symbol, base_asset, quote_asset, is_active
+         FROM markets
+         WHERE symbol = $1",
+    )
+    .bind(symbol)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("database error: {e}") })),
+        )
+    })?
+    .ok_or_else(|| not_found("market not found"))?;
+
+    if !market.is_active {
+        return Err(bad_request("market is halted"));
+    }
+
+    Ok(market)
 }
 
 fn validate_price_band(

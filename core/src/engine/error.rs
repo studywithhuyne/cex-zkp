@@ -15,6 +15,4 @@ pub enum EngineError {
     #[error("amount must be positive, got {0}")]
     InvalidAmount(Decimal),
 
-    #[error("self-trade prevented for user_id {0}: incoming order rejected")]
-    SelfTradePrevented(u64),
 }

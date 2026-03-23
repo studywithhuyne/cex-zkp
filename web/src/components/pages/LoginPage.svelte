@@ -28,7 +28,7 @@
         await register(username, password);
         message = "Dang ky thanh cong";
       }
-      router.navigate("/trade");
+      router.navigate("/");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Xac thuc that bai";
       message = msg;

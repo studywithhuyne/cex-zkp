@@ -226,12 +226,6 @@ impl OrderBook {
             return Err(EngineError::DuplicateOrderId(taker.id));
         }
 
-        // STP (Self-Trade Prevention): reject the incoming order immediately
-        // if the best crossable maker belongs to the same user.
-        if self.would_self_trade_on_best_level(&taker) {
-            return Err(EngineError::SelfTradePrevented(taker.user_id));
-        }
-
         let mut taker = taker;
         let mut trades = Vec::new();
 
@@ -255,41 +249,6 @@ impl OrderBook {
         Ok(trades)
     }
 
-    /// Returns true when `taker` would immediately cross with a best-price
-    /// resting order owned by the same user.
-    fn would_self_trade_on_best_level(&self, taker: &Order) -> bool {
-        match taker.side {
-            Side::Buy => {
-                let Some(best_ask) = self.asks.keys().next().copied() else {
-                    return false;
-                };
-                if best_ask > taker.price {
-                    return false;
-                }
-
-                self.asks
-                    .get(&best_ask)
-                    .and_then(|queue| queue.front())
-                    .map(|maker| maker.user_id == taker.user_id)
-                    .unwrap_or(false)
-            }
-            Side::Sell => {
-                let Some(best_bid) = self.bids.keys().next().map(|Reverse(p)| *p) else {
-                    return false;
-                };
-                if best_bid < taker.price {
-                    return false;
-                }
-
-                self.bids
-                    .get(&Reverse(best_bid))
-                    .and_then(|queue| queue.front())
-                    .map(|maker| maker.user_id == taker.user_id)
-                    .unwrap_or(false)
-            }
-        }
-    }
-
     // ── Private matching helpers ────────────────────────────────────────────
 
     /// Inner loop for a Buy taker: consume resting asks from lowest to highest.
@@ -300,6 +259,18 @@ impl OrderBook {
                 Some(p) if p <= taker.price => p,
                 _ => break,
             };
+
+            // STP: do not self-match. If the best maker is the same user,
+            // stop matching and rest the remaining taker quantity.
+            let best_is_self = self
+                .asks
+                .get(&best_ask)
+                .and_then(|queue| queue.front())
+                .map(|maker| maker.user_id == taker.user_id)
+                .unwrap_or(false);
+            if best_is_self {
+                break;
+            }
 
             // Inner scope so the mutable borrow of `self.asks` is released
             // before we potentially remove the price level below.
@@ -343,6 +314,18 @@ impl OrderBook {
                 Some(p) if p >= taker.price => p,
                 _ => break,
             };
+
+            // STP: do not self-match. If the best maker is the same user,
+            // stop matching and rest the remaining taker quantity.
+            let best_is_self = self
+                .bids
+                .get(&Reverse(best_bid))
+                .and_then(|queue| queue.front())
+                .map(|maker| maker.user_id == taker.user_id)
+                .unwrap_or(false);
+            if best_is_self {
+                break;
+            }
 
             // Inner scope so the mutable borrow of `self.bids` is released
             // before we potentially remove the price level below.
@@ -739,31 +722,61 @@ mod tests {
     // ─── STP (Self-Trade Prevention) ─────────────────────────────────────
 
     #[test]
-    fn stp_rejects_buy_when_best_ask_has_same_user() {
+    fn stp_prevents_buy_self_match_and_rests_order() {
         let mut book = OrderBook::new();
         book.add_order(sell_user(1, 7, dec!(100), dec!(2))).unwrap();
 
-        let err = book
-            .match_order(buy_user(2, 7, dec!(100), dec!(1)))
-            .unwrap_err();
+        let trades = book.match_order(buy_user(2, 7, dec!(100), dec!(1))).unwrap();
 
-        assert_eq!(err, EngineError::SelfTradePrevented(7));
-        assert_eq!(book.len(), 1);
+        assert!(trades.is_empty());
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_ask(), Some(dec!(100)));
+        assert_eq!(book.best_bid(), Some(dec!(100)));
+    }
+
+    #[test]
+    fn stp_prevents_sell_self_match_and_rests_order() {
+        let mut book = OrderBook::new();
+        book.add_order(buy_user(1, 11, dec!(100), dec!(2))).unwrap();
+
+        let trades = book.match_order(sell_user(2, 11, dec!(100), dec!(1))).unwrap();
+
+        assert!(trades.is_empty());
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_bid(), Some(dec!(100)));
         assert_eq!(book.best_ask(), Some(dec!(100)));
     }
 
     #[test]
-    fn stp_rejects_sell_when_best_bid_has_same_user() {
+    fn stp_buy_matches_others_then_stops_before_self_level() {
         let mut book = OrderBook::new();
-        book.add_order(buy_user(1, 11, dec!(100), dec!(2))).unwrap();
+        book.add_order(sell_user(1, 21, dec!(100), dec!(1))).unwrap();
+        book.add_order(sell_user(2, 42, dec!(101), dec!(1))).unwrap();
 
-        let err = book
-            .match_order(sell_user(2, 11, dec!(100), dec!(1)))
-            .unwrap_err();
+        let trades = book.match_order(buy_user(3, 42, dec!(101), dec!(2))).unwrap();
 
-        assert_eq!(err, EngineError::SelfTradePrevented(11));
-        assert_eq!(book.len(), 1);
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].maker_order_id, 1);
+        assert_eq!(trades[0].amount, dec!(1));
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_ask(), Some(dec!(101)));
+        assert_eq!(book.best_bid(), Some(dec!(101)));
+    }
+
+    #[test]
+    fn stp_sell_matches_others_then_stops_before_self_level() {
+        let mut book = OrderBook::new();
+        book.add_order(buy_user(1, 31, dec!(101), dec!(1))).unwrap();
+        book.add_order(buy_user(2, 55, dec!(100), dec!(1))).unwrap();
+
+        let trades = book.match_order(sell_user(3, 55, dec!(100), dec!(2))).unwrap();
+
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].maker_order_id, 1);
+        assert_eq!(trades[0].amount, dec!(1));
+        assert_eq!(book.len(), 2);
         assert_eq!(book.best_bid(), Some(dec!(100)));
+        assert_eq!(book.best_ask(), Some(dec!(100)));
     }
 
     // ─── ENG-07: FIFO during matching ─────────────────────────────────────
