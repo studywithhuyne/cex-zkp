@@ -49,6 +49,13 @@
     return ASSET_ICONS[symbol] ?? "/icons/coins/default.svg";
   }
 
+  function handleIconError(event: Event) {
+    const target = event.currentTarget as HTMLImageElement;
+    if (!target.src.endsWith("/icons/coins/default.svg")) {
+      target.src = "/icons/coins/default.svg";
+    }
+  }
+
   function consumeActionIntent() {
     const raw = localStorage.getItem("asset_default_action");
     if (raw === "deposit" || raw === "withdraw" || raw === "transfer") {
@@ -197,12 +204,12 @@
       <div>
         <p class="mono text-xs uppercase tracking-[0.15em] text-slate-500">Estimated Balance</p>
         <div class="mt-2 flex items-end gap-3">
-          <p class="mono text-4xl font-bold text-slate-100 lg:text-[2.6rem]">
+          <p class="mono text-2xl font-bold text-slate-100 lg:text-3xl">
             {parseFloat(availableOf(selectedAsset)).toLocaleString(undefined, { maximumFractionDigits: 8 })}
           </p>
           <select
             bind:value={selectedAsset}
-            class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-base text-slate-200 outline-none focus:border-sky-500/50"
+            class="rounded-lg border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 outline-none focus:border-sky-500/50"
           >
             {#each viewAssets as asset}
               <option value={asset.symbol}>{asset.symbol}</option>
@@ -346,7 +353,7 @@
 
   <section class="terminal-panel-strong p-5">
     <div class="mb-3 flex items-center justify-between">
-      <h2 class="text-xl font-bold tracking-wide text-slate-100 uppercase">My Assets</h2>
+      <h2 class="text-lg font-bold tracking-wide text-slate-100 uppercase">My Assets</h2>
       <span class="mono text-[12px] text-slate-500">{viewAssets.length} assets</span>
     </div>
 
@@ -373,14 +380,12 @@
                     <img
                       src={iconPath(asset.symbol)}
                       alt={asset.symbol}
-                      class="h-5 w-5 rounded-full object-cover bg-slate-800 ring-1 ring-slate-600/60"
+                      class="h-4 w-4 rounded-full object-contain bg-slate-900 p-px ring-1 ring-slate-600/60"
+                      width="16"
+                      height="16"
                       loading="lazy"
-                      onerror={(event) => {
-                        const target = event.currentTarget as HTMLImageElement;
-                        if (!target.src.endsWith('/icons/coins/default.svg')) {
-                          target.src = '/icons/coins/default.svg';
-                        }
-                      }}
+                      decoding="async"
+                      onerror={handleIconError}
                     />
                     <span>{asset.symbol}</span>
                   </div>

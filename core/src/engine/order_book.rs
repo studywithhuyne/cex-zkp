@@ -227,8 +227,8 @@ impl OrderBook {
         }
 
         // STP (Self-Trade Prevention): reject the incoming order immediately
-        // if the best crossable maker belongs to the same user.
-        if self.would_self_trade_on_best_level(&taker) {
+        // if any crossable resting maker belongs to the same user.
+        if self.would_self_trade_on_crossable_levels(&taker) {
             return Err(EngineError::SelfTradePrevented(taker.user_id));
         }
 
@@ -255,38 +255,18 @@ impl OrderBook {
         Ok(trades)
     }
 
-    /// Returns true when `taker` would immediately cross with a best-price
-    /// resting order owned by the same user.
-    fn would_self_trade_on_best_level(&self, taker: &Order) -> bool {
+    /// Returns true when `taker` would cross with any opposite resting order
+    /// owned by the same user within the current price limit.
+    fn would_self_trade_on_crossable_levels(&self, taker: &Order) -> bool {
         match taker.side {
-            Side::Buy => {
-                let Some(best_ask) = self.asks.keys().next().copied() else {
-                    return false;
-                };
-                if best_ask > taker.price {
-                    return false;
-                }
-
-                self.asks
-                    .get(&best_ask)
-                    .and_then(|queue| queue.front())
-                    .map(|maker| maker.user_id == taker.user_id)
-                    .unwrap_or(false)
-            }
-            Side::Sell => {
-                let Some(best_bid) = self.bids.keys().next().map(|Reverse(p)| *p) else {
-                    return false;
-                };
-                if best_bid < taker.price {
-                    return false;
-                }
-
-                self.bids
-                    .get(&Reverse(best_bid))
-                    .and_then(|queue| queue.front())
-                    .map(|maker| maker.user_id == taker.user_id)
-                    .unwrap_or(false)
-            }
+            Side::Buy => self
+                .asks
+                .range(..=taker.price)
+                .any(|(_, queue)| queue.iter().any(|maker| maker.user_id == taker.user_id)),
+            Side::Sell => self
+                .bids
+                .range(Reverse(taker.price)..)
+                .any(|(_, queue)| queue.iter().any(|maker| maker.user_id == taker.user_id)),
         }
     }
 
@@ -764,6 +744,36 @@ mod tests {
         assert_eq!(err, EngineError::SelfTradePrevented(11));
         assert_eq!(book.len(), 1);
         assert_eq!(book.best_bid(), Some(dec!(100)));
+    }
+
+    #[test]
+    fn stp_rejects_buy_when_crossing_deeper_level_has_same_user() {
+        let mut book = OrderBook::new();
+        book.add_order(sell_user(1, 21, dec!(100), dec!(1))).unwrap();
+        book.add_order(sell_user(2, 42, dec!(101), dec!(1))).unwrap();
+
+        let err = book
+            .match_order(buy_user(3, 42, dec!(101), dec!(2)))
+            .unwrap_err();
+
+        assert_eq!(err, EngineError::SelfTradePrevented(42));
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_ask(), Some(dec!(100)));
+    }
+
+    #[test]
+    fn stp_rejects_sell_when_crossing_deeper_level_has_same_user() {
+        let mut book = OrderBook::new();
+        book.add_order(buy_user(1, 31, dec!(101), dec!(1))).unwrap();
+        book.add_order(buy_user(2, 55, dec!(100), dec!(1))).unwrap();
+
+        let err = book
+            .match_order(sell_user(3, 55, dec!(100), dec!(2)))
+            .unwrap_err();
+
+        assert_eq!(err, EngineError::SelfTradePrevented(55));
+        assert_eq!(book.len(), 2);
+        assert_eq!(book.best_bid(), Some(dec!(101)));
     }
 
     // ─── ENG-07: FIFO during matching ─────────────────────────────────────

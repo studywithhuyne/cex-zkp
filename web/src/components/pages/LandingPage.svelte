@@ -107,13 +107,13 @@
       </div>
 
       <h1 class="mb-6 text-4xl font-extrabold tracking-tight text-white md:text-5xl lg:text-6xl">
-        High-Performance Trading <br class="hidden md:block" />
-        <span class="bg-linear-to-r from-cyan-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent">Meets Verifiable Trust</span>
+        Trade at the Speed of Light <br class="hidden md:block" />
+        <span class="bg-linear-to-r from-cyan-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent">Verify with Zero-Knowledge</span>
       </h1>
       
       <p class="mx-auto mb-10 max-w-2xl text-base md:text-lg text-slate-400 leading-relaxed">
-        Experience micro-second latency execution with full cryptographic proof of solvency. 
-        Enjoy the high speed of a Centralized Exchange while guaranteeing your funds are mathematically secure.
+        Experience JerryX's micro-second latency matching engine with full cryptographic Proof of Solvency. 
+        Enjoy the deep liquidity of a Centralized Exchange while guaranteeing your digital assets are mathematically secure.
       </p>
 
       <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
