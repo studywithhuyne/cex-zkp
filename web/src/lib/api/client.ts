@@ -199,9 +199,10 @@ export const fetchUsers = (userId: AuthUserId) =>
 
 // -- Admin Endpoints --
 export type AdminMetrics = { volume_24h_usdt: string; total_users: number; active_orders: number; };
-export type TreasuryMetrics = { total_exchange_funds: string; total_user_liabilities: string; solvency_ratio: string; };
+export type TreasuryMetrics = { exchange_capital: string; total_exchange_funds: string; total_user_liabilities: string; solvency_ratio: string; };
 export type AdminAssetDto = { symbol: string; name: string; decimals: number; is_active: boolean; };
 export type AdminUserDto = { user_id: number; username: string; is_suspended: boolean; };
+export type ZkSnapshotDto = { snapshot_id: string; root_hash: string; users_included: number; created_at: string; };
 
 export const fetchAdminMetrics = () => apiGet<AdminMetrics>('/api/admin/metrics');
 export const fetchTreasuryMetrics = () => apiGet<TreasuryMetrics>('/api/admin/treasury');
@@ -210,5 +211,5 @@ export const haltMarket = (symbol: string) => apiPost('/api/admin/markets/halt',
 export const fetchAdminUsers = () => apiGet<AdminUserDto[]>('/api/admin/users');
 export const suspendUser = (userId: number) => fetch('/api/admin/users/' + userId + '/suspend', { method: 'PUT' });
 export const triggerZkpSnapshot = () => apiPost('/api/admin/zkp/snapshot', {}, 1);
-export const fetchZkpHistory = () => apiGet<any[]>('/api/admin/zkp/history');
+export const fetchZkpHistory = () => apiGet<ZkSnapshotDto[]>('/api/admin/zkp/history');
 

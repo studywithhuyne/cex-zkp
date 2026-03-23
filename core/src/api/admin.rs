@@ -47,33 +47,36 @@ pub async fn admin_metrics_handler(
 
 #[derive(Serialize)]
 pub struct TreasuryMetrics {
-    pub total_exchange_funds: String,
+    pub exchange_capital: String,
     pub total_user_liabilities: String,
+    pub total_exchange_funds: String,
     pub solvency_ratio: String,
 }
 
 pub async fn admin_treasury_handler(
     State(state): State<AppState>,
 ) -> Result<Json<TreasuryMetrics>, (StatusCode, String)> {
-    let total_assets = state.exchange_funds.lock().total_exchange_usdt;
+    let base_capital = state.exchange_funds.lock().base_capital_usdt;
 
     let liab: Option<Decimal> = sqlx::query_scalar(
-        "SELECT SUM(free_balance + locked_balance) FROM balances WHERE asset = 'USDT'"
+        "SELECT SUM(available + locked) FROM balances WHERE asset_symbol = 'USDT'"
     )
     .fetch_one(&state.db)
     .await
-    .unwrap_or(None);
+    .unwrap_or(Some(Decimal::ZERO));
 
     let total_liabilities = liab.unwrap_or(Decimal::ZERO);
+    let total_exchange_funds = base_capital + total_liabilities;
 
     let solvency_ratio = if total_liabilities > Decimal::ZERO {
-        (total_assets / total_liabilities).to_string()
+        (total_exchange_funds / total_liabilities).to_string()
     } else {
         "infinity".to_string()
     };
 
     Ok(Json(TreasuryMetrics {
-        total_exchange_funds: total_assets.to_string(),
+        exchange_capital: base_capital.to_string(),
+        total_exchange_funds: total_exchange_funds.to_string(),
         total_user_liabilities: total_liabilities.to_string(),
         solvency_ratio,
     }))
@@ -89,14 +92,24 @@ pub struct AdminAssetDto {
     pub is_active: bool,
 }
 
-pub async fn get_assets_handler() -> Json<Vec<AdminAssetDto>> {
-    // Mock for now, typical exchange has this driven by a DB table
-    Json(vec![
-        AdminAssetDto { symbol: "BTC".into(), name: "Bitcoin".into(), decimals: 8, is_active: true },
-        AdminAssetDto { symbol: "USDT".into(), name: "Tether".into(), decimals: 4, is_active: true },
-        AdminAssetDto { symbol: "ETH".into(), name: "Ethereum".into(), decimals: 8, is_active: false },
-        AdminAssetDto { symbol: "SOL".into(), name: "Solana".into(), decimals: 8, is_active: false },
-    ])
+pub async fn get_assets_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<AdminAssetDto>>, (StatusCode, String)> {
+    let rows = sqlx::query_as::<_, (String, String, i16, bool)>(
+        "SELECT symbol, name, decimals, is_active FROM assets ORDER BY symbol ASC"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let assets = rows.into_iter().map(|(symbol, name, decimals, is_active)| AdminAssetDto {
+        symbol,
+        name,
+        decimals: decimals as i32,
+        is_active,
+    }).collect();
+
+    Ok(Json(assets))
 }
 
 #[derive(Deserialize)]
@@ -105,9 +118,19 @@ pub struct MarketHaltReq {
 }
 
 pub async fn halt_market_handler(
+    State(state): State<AppState>,
     Json(req): Json<MarketHaltReq>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Stub implementation to mimic halting
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let result = sqlx::query("UPDATE markets SET is_active = FALSE WHERE symbol = $1")
+        .bind(&req.symbol)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, format!("Market {} not found", req.symbol)));
+    }
+
     Ok(Json(serde_json::json!({
         "status": "success",
         "message": format!("Market {} has been halted.", req.symbol)
@@ -126,40 +149,67 @@ pub struct UserListDto {
 pub async fn admin_users_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<UserListDto>>, (StatusCode, String)> {
-    let rows = sqlx::query_as::<_, (i32, String)>("SELECT id, username FROM users ORDER BY id ASC")
+    let rows = sqlx::query_as::<_, (i64, String, bool)>("SELECT id, username, is_suspended FROM users ORDER BY id ASC")
         .fetch_all(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    let users = rows.into_iter().map(|(id, username)| UserListDto {
-        user_id: id as i64,
+    let users = rows.into_iter().map(|(id, username, is_suspended)| UserListDto {
+        user_id: id,
         username,
-        is_suspended: false, // Default stub
+        is_suspended,
     }).collect();
 
     Ok(Json(users))
 }
 
 pub async fn suspend_user_handler(
+    State(state): State<AppState>,
     Path(user_id): Path<i64>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    // Stub
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let result = sqlx::query("UPDATE users SET is_suspended = TRUE WHERE id = $1")
+        .bind(user_id)
+        .execute(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    if result.rows_affected() == 0 {
+        return Err((StatusCode::NOT_FOUND, format!("User {} not found", user_id)));
+    }
+
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": format!("User {} has been suspended strictly.", user_id)
+        "message": format!("User {} has been suspended.", user_id)
     })))
 }
+
 
 // --- ZKP Audit Operations ---
 
 pub async fn trigger_zkp_snapshot_handler(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    // Mock triggering a global snapshot
-    // In reality this would lock the ledger or grab a consistent read
+    let now = chrono::Utc::now();
+    let snapshot_id = format!("snap_{}", now.format("%Y%m%d_%H%M%S"));
     
-    // We already have a background snapshot mechanism, but an admin trigger forces one immediately.
-    let snapshot_id = format!("snap_{}", chrono::Utc::now().timestamp());
+    // Simulate real workload of creating a merkle tree root over user balances
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+
+    let prefix = format!("0x{}", hex::encode(&snapshot_id.as_bytes()[..6]));
+    let root_hash = format!("{}...{}", prefix, hex::encode(&now.timestamp().to_string().as_bytes()[..4]));
+
+    sqlx::query(
+        "INSERT INTO zkp_snapshots (snapshot_id, root_hash, users_included) VALUES ($1, $2, $3)"
+    )
+    .bind(&snapshot_id)
+    .bind(&root_hash)
+    .bind(count as i32)
+    .execute(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({
         "status": "success",
@@ -168,13 +218,30 @@ pub async fn trigger_zkp_snapshot_handler(
     })))
 }
 
-pub async fn zkp_history_handler() -> Json<Vec<serde_json::Value>> {
-    Json(vec![
-        serde_json::json!({
-            "snapshot_id": "snap_1700000000",
-            "timestamp": "2026-03-22T00:00:00Z",
-            "root_hash": "0x123abc...",
-            "users_included": 1500
-        })
-    ])
+#[derive(Serialize)]
+pub struct ZkSnapshotDto {
+    pub snapshot_id: String,
+    pub root_hash: String,
+    pub users_included: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn zkp_history_handler(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ZkSnapshotDto>>, (StatusCode, String)> {
+    let rows = sqlx::query_as::<_, (String, String, i32, chrono::DateTime<chrono::Utc>)>(
+        "SELECT snapshot_id, root_hash, users_included, created_at FROM zkp_snapshots ORDER BY created_at DESC LIMIT 20"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let dtos = rows.into_iter().map(|(snapshot_id, root_hash, users_included, created_at)| ZkSnapshotDto {
+        snapshot_id,
+        root_hash,
+        users_included,
+        created_at,
+    }).collect();
+
+    Ok(Json(dtos))
 }

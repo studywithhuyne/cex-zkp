@@ -32,7 +32,7 @@
 
 <div class="mx-auto mt-16 max-w-md">
   <div class="terminal-panel p-6 shadow-2xl">
-    <div class="mb-6 mb-8 text-center">
+    <div class="mb-6 text-center">
       <h2 class="mono text-xl tracking-wider text-sky-400">
         ADMINISTRATOR LOGIN
       </h2>

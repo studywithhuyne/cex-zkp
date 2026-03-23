@@ -10,15 +10,20 @@
     suspendUser,
     haltMarket,
     triggerZkpSnapshot,
+    fetchZkpHistory,
     type AdminMetrics,
     type TreasuryMetrics,
     type AdminAssetDto,
-    type AdminUserDto
+    type AdminUserDto,
+    type ZkSnapshotDto
   } from "../../lib/api/client";
 
   // Dashboard state
   let metrics = $state<AdminMetrics | null>(null);
   let treasury = $state<TreasuryMetrics | null>(null);
+
+  // ZKP State
+  let zkpHistory = $state<ZkSnapshotDto[]>([]);
   
   // Assets state
   let assets = $state<AdminAssetDto[]>([]);
@@ -57,6 +62,14 @@
     }
   }
 
+  async function loadZkp() {
+    try {
+      zkpHistory = await fetchZkpHistory();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
   onMount(() => {
     loadDashboard();
   });
@@ -65,6 +78,7 @@
     if (activeTab === "dashboard") loadDashboard();
     if (activeTab === "assets") loadAssets();
     if (activeTab === "users") loadUsers();
+    if (activeTab === "zkp") loadZkp();
   });
 
   async function handleSuspend(userId: number) {
@@ -93,8 +107,9 @@
   async function handleZkpSnapshot() {
     if (!confirm("Are you sure you want to trigger a global balance snapshot for ZKP?")) return;
     try {
-      const res = await triggerZkpSnapshot();
+      await triggerZkpSnapshot();
       message = `Snapshot triggered successfully.`;
+      loadZkp();
       setTimeout(() => message = null, 3000);
     } catch (e: any) {
       alert("Error: " + e.message);
@@ -173,12 +188,16 @@
         {#if treasury}
           <div class="space-y-4">
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
-              <span class="text-sm text-slate-400">Total Assets (Exchange Wallet)</span>
-              <span class="text-sm font-bold text-emerald-400 mono">${parseFloat(treasury.total_exchange_funds).toLocaleString()}</span>
+              <span class="text-sm text-slate-400">Exchange Base Capital (Vốn sàn)</span>
+              <span class="text-sm font-bold text-sky-400 mono">${parseFloat(treasury.exchange_capital).toLocaleString()}</span>
             </div>
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
-              <span class="text-sm text-slate-400">Total Liabilities (User Balances)</span>
+              <span class="text-sm text-slate-400">Total Liabilities (Nợ/Tiền User)</span>
               <span class="text-sm font-bold text-rose-400 mono">${parseFloat(treasury.total_user_liabilities).toLocaleString()}</span>
+            </div>
+            <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50 mt-2">
+              <span class="text-sm text-slate-400 font-medium">Total Exchange Wallet (Vốn + Nợ)</span>
+              <span class="text-sm font-bold text-emerald-400 mono">${parseFloat(treasury.total_exchange_funds).toLocaleString()}</span>
             </div>
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
               <span class="text-sm text-slate-400">Solvency Ratio</span>
@@ -291,8 +310,22 @@
 
       <div class="mt-4 text-left border-t border-slate-800 pt-4">
         <h3 class="text-xs text-slate-500 uppercase tracking-widest mb-3">Recent ZKP Snapshots</h3>
-        <div class="bg-slate-900 border border-slate-800 rounded py-2 px-3 text-sm text-slate-400 mono">
-          <p>ID: snap_20260323_01 • Hash: 0x8a92...eb14 • Users: 4</p>
+        <div class="space-y-2">
+          {#each zkpHistory as snap}
+            <div class="bg-slate-900 border border-slate-800 rounded py-3 px-4 text-sm text-slate-300 mono flex flex-col md:flex-row md:items-center justify-between gap-2 hover:border-slate-700 transition-colors">
+              <div class="flex items-center gap-4">
+                <span class="text-sky-400 font-semibold">{snap.snapshot_id}</span>
+                <span class="text-slate-500 hidden md:inline">|</span>
+                <span class="text-slate-400">Users: <span class="text-slate-200">{snap.users_included}</span></span>
+              </div>
+              <div class="flex flex-col items-end gap-1 md:items-end">
+                 <span class="text-xs text-slate-500">{new Date(snap.created_at).toLocaleString()}</span>
+                 <span class="text-xs text-indigo-400 truncate max-w-50 md:max-w-xs">{snap.root_hash}</span>
+              </div>
+            </div>
+          {:else}
+             <p class="text-sm text-slate-500 italic">No snapshots recorded yet.</p>
+          {/each}
         </div>
       </div>
     </div>
