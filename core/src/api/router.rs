@@ -59,7 +59,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/admin/metrics", get(admin::admin_metrics_handler))
         .route("/api/admin/treasury", get(admin::admin_treasury_handler))
         .route("/api/admin/assets", get(admin::get_assets_handler))
-        // .route("/api/admin/assets", post(admin::add_asset_handler)) // if needed
+        .route("/api/admin/assets", post(admin::add_asset_handler))
         .route("/api/admin/markets/halt", post(admin::halt_market_handler))
         .route("/api/admin/users", get(admin::admin_users_handler))
         .route("/api/admin/users/:id/suspend", put(admin::suspend_user_handler))

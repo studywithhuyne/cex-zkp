@@ -207,6 +207,7 @@ export type ZkSnapshotDto = { snapshot_id: string; root_hash: string; users_incl
 export const fetchAdminMetrics = () => apiGet<AdminMetrics>('/api/admin/metrics');
 export const fetchTreasuryMetrics = () => apiGet<TreasuryMetrics>('/api/admin/treasury');
 export const fetchAdminAssets = () => apiGet<AdminAssetDto[]>('/api/admin/assets');
+export const addAsset = (symbol: string, name: string) => apiPost('/api/admin/assets', { symbol, name }, 1);
 export const haltMarket = (symbol: string) => apiPost('/api/admin/markets/halt', { symbol }, 1);
 export const fetchAdminUsers = () => apiGet<AdminUserDto[]>('/api/admin/users');
 export const suspendUser = (userId: number) => fetch('/api/admin/users/' + userId + '/suspend', { method: 'PUT' });

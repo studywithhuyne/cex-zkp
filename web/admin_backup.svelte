@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from "svelte";
   import { router } from "../../stores/routerStore";
   import { logoutAdmin } from "../../stores/adminAuthStore";
@@ -6,7 +6,6 @@
     fetchAdminMetrics,
     fetchTreasuryMetrics,
     fetchAdminAssets,
-    addAsset,
     fetchAdminUsers,
     suspendUser,
     haltMarket,
@@ -29,9 +28,7 @@
 
   // Assets state
   let assets = $state<AdminAssetDto[]>([]);
-  let newAssetSymbol = $state("");
-  let newAssetName = $state("");
-
+  
   // Users state
   let users = $state<AdminUserDto[]>([]);
   
@@ -47,24 +44,6 @@
       treasury = await fetchTreasuryMetrics();
     } catch (e) {
       console.error(e);
-    }
-  }
-
-  async function handleAddAsset() {
-    if (!newAssetSymbol || !newAssetName) {
-      alert("Please fill in both symbol and name.");
-      return;
-    }
-    try {
-      await addAsset(newAssetSymbol, newAssetName);
-      newAssetSymbol = "";
-      newAssetName = "";
-      await loadAssets(); // Refresh the list
-      message = "Asset added successfully.";
-      setTimeout(() => (message = null), 3000);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to add asset.");
     }
   }
 
@@ -210,15 +189,15 @@
         {#if treasury}
           <div class="space-y-4">
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
-              <span class="text-sm text-slate-400">Exchange Base Capital (Vá»‘n sÃ n)</span>
+              <span class="text-sm text-slate-400">Exchange Base Capital (Vốn sàn)</span>
               <span class="text-sm font-bold text-sky-400 mono">${parseFloat(treasury.exchange_capital).toLocaleString()}</span>
             </div>
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
-              <span class="text-sm text-slate-400">Total Liabilities (Ná»£/Tiá»n User)</span>
+              <span class="text-sm text-slate-400">Total Liabilities (Nợ/Tiền User)</span>
               <span class="text-sm font-bold text-rose-400 mono">${parseFloat(treasury.total_user_liabilities).toLocaleString()}</span>
             </div>
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50 mt-2">
-              <span class="text-sm text-slate-400 font-medium">Total Exchange Wallet (Vá»‘n + Ná»£)</span>
+              <span class="text-sm text-slate-400 font-medium">Total Exchange Wallet (Vốn + Nợ)</span>
               <span class="text-sm font-bold text-emerald-400 mono">${parseFloat(treasury.total_exchange_funds).toLocaleString()}</span>
             </div>
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
@@ -271,9 +250,9 @@
         <div class="bg-slate-900 border border-slate-800 rounded-lg p-4">
           <h3 class="text-xs text-slate-400 uppercase tracking-widest mb-3">Add New Asset</h3>
           <div class="flex gap-3">
-              <input type="text" placeholder="Symbol (e.g. ADA)" bind:value={newAssetSymbol} class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-sky-500 text-white" />
-              <input type="text" placeholder="Name" bind:value={newAssetName} class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:border-sky-500 text-white" />
-              <button onclick={handleAddAsset} class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors">Add</button>
+            <input type="text" placeholder="Symbol (e.g. ADA)" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-sm w-32 focus:outline-none focus:border-sky-500 text-white" />
+            <input type="text" placeholder="Name" class="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:border-sky-500 text-white" />
+            <button class="bg-sky-600 hover:bg-sky-500 text-white px-4 py-1.5 rounded text-sm font-medium transition-colors">Add</button>
           </div>
         </div>
     </div>
@@ -412,4 +391,5 @@
     {/if}
 {/if}
 </div>
+
 

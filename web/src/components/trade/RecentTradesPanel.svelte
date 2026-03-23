@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { orderBook } from "../../stores/orderBookStore";
+  import { selectedMarket } from "../../stores/marketStore";
   import { fetchRecentTrades } from "../../lib/api/client";
   import type { RecentTrade } from "../../lib/api/client";
 
@@ -19,7 +20,7 @@
     const wsTrades = $orderBook.trades.map((t: { price: number; amount: number }) => ({
       price: String(t.price),
       amount: String(t.amount),
-      base_asset: "BTC",
+      base_asset: $selectedMarket.split("_")[0],
       quote_asset: "USDT",
       executed_at: new Date().toISOString(),
     }));

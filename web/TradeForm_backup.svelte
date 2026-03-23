@@ -2,7 +2,6 @@
   import { connectionState } from '../../stores/appStore';
   import { authState } from '../../stores/authStore';
   import { orderBook } from '../../stores/orderBookStore';
-  import { selectedMarket } from '../../stores/marketStore';
   import { fetchAveragePrice, fetchBalances, type BalanceDto } from '../../lib/api/client';
 
   // ── Active tab ────────────────────────────────────────────────────────────
@@ -21,12 +20,11 @@
 
   // ── Balances from API ─────────────────────────────────────────────────────
   let usdtAvailable = $state("0.00");
-  let baseAvailable  = $state("0.000");
-  let baseAsset = $derived($selectedMarket.split("_")[0]);
+  let btcAvailable  = $state("0.000");
 
   async function loadAveragePrice() {
     try {
-      const avg = await fetchAveragePrice($selectedMarket);
+      const avg = await fetchAveragePrice("BTC_USDT");
       midPrice   = avg.mid_price;
       microPrice = avg.micro_price;
     } catch {
@@ -40,9 +38,9 @@
     try {
       const balances: BalanceDto[] = await fetchBalances($authState.userId);
       const usdt = balances.find(b => b.asset === "USDT");
-      const base  = balances.find(b => b.asset === baseAsset);
+      const btc  = balances.find(b => b.asset === "BTC");
       if (usdt) usdtAvailable = parseFloat(usdt.available).toFixed(2);
-      if (base)  baseAvailable  = parseFloat(base.available).toFixed(3);
+      if (btc)  btcAvailable  = parseFloat(btc.available).toFixed(3);
     } catch {
       // keep defaults on failure
     }
@@ -73,10 +71,10 @@
         amount = ((usdt * pct / 100) / p).toFixed(6);
       }
     } else {
-      // sell: pct of base available
-      const baseAmount = parseFloat(baseAvailable);
-      if (baseAmount > 0) {
-        amount = ((baseAmount * pct / 100)).toFixed(6);
+      // sell: pct of BTC available
+      const btc = parseFloat(btcAvailable);
+      if (btc > 0) {
+        amount = ((btc * pct / 100)).toFixed(6);
       }
     }
   }
@@ -105,7 +103,7 @@
           side:        activeSide,
           price:       String(price),
           amount:      String(amount),
-          base_asset: baseAsset,
+          base_asset:  "BTC",
           quote_asset: "USDT",
         }),
       });
@@ -115,7 +113,7 @@
       if (resp.ok) {
         const matched = parseFloat(data.matched_amount ?? "0");
         resultMsg = matched > 0
-          ? `Filled ${matched.toFixed(6)} ${baseAsset} instantly`
+          ? `Filled ${matched.toFixed(6)} BTC instantly`
           : `Order placed — resting on book`;
         isError   = false;
 
@@ -123,7 +121,7 @@
         if (Array.isArray(data.updated_balances)) {
           for (const b of data.updated_balances) {
             if (b.asset === "USDT") usdtAvailable = parseFloat(b.available).toFixed(2);
-            if (b.asset === baseAsset)  btcAvailable  = parseFloat(b.available).toFixed(3);
+            if (b.asset === "BTC")  btcAvailable  = parseFloat(b.available).toFixed(3);
           }
         } else {
           // Fallback: fetch balances separately if server didn't include them.
@@ -139,7 +137,7 @@
               amount:      String(amount),
               filled:      String(data.matched_amount ?? "0"),
               status:      matched > 0 && parseFloat(amount) === matched ? "filled" : "open",
-              base_asset: baseAsset,
+              base_asset:  "BTC",
               quote_asset: "USDT",
               created_at:  new Date().toISOString(),
             },
@@ -166,7 +164,7 @@
   <!-- Header row: title + market badge -->
   <div class="mb-4 flex items-center justify-between">
     <h2 class="text-sm font-semibold tracking-wide text-slate-100 uppercase">Trade</h2>
-    <span class="mono text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">Spot · {baseAsset}/USDT</span>
+    <span class="mono text-[10px] text-slate-500 bg-slate-800/50 px-2 py-0.5 rounded">Spot · BTC/USDT</span>
   </div>
 
   <!-- Mid / Micro price strip -->
@@ -211,7 +209,7 @@
       {#if activeSide === 'buy'}
         <span class="text-slate-200">{usdtAvailable} USDT</span>
       {:else}
-        <span class="text-slate-200">{baseAvailable} {baseAsset}</span>
+        <span class="text-slate-200">{btcAvailable} BTC</span>
       {/if}
     </span>
   </div>
@@ -252,7 +250,7 @@
           bind:value={amount}
           class="mono w-full bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-600"
         />
-        <span class="mono text-xs text-slate-500 ml-2 shrink-0">{baseAsset}</span>
+        <span class="mono text-xs text-slate-500 ml-2 shrink-0">BTC</span>
       </div>
     </div>
 
@@ -302,7 +300,7 @@
           ? 'bg-emerald-500 hover:bg-emerald-400 text-white shadow-[0_4px_20px_rgba(16,185,129,0.3)]'
           : 'bg-rose-500 hover:bg-rose-400 text-white shadow-[0_4px_20px_rgba(244,63,94,0.3)]'}"
     >
-      {isSubmitting ? "Placing..." : activeSide === "buy" ? "Buy {baseAsset}" : "Sell {baseAsset}"}
+      {isSubmitting ? "Placing..." : activeSide === "buy" ? "Buy BTC" : "Sell BTC"}
     </button>
 
   </form>
@@ -316,5 +314,4 @@
     cursor: pointer;
   }
 </style>
-
 

@@ -1,6 +1,5 @@
-import { writable, get } from "svelte/store";
+import { writable } from "svelte/store";
 import { connectionState } from "./appStore";
-import { selectedMarket } from "./marketStore";
 
 // WebSocket URL: dynamic so it works in both dev (Vite proxy on :5173) and Docker (Nginx on :8080).
 // Override via VITE_WS_URL env var if needed.
@@ -33,12 +32,12 @@ type WsApiPriceLevel = { price: string; amount: string };
 
 type WsOrderbookUpdate = {
   type: "orderbook_update";
-  data: { symbol: string; bids: WsApiPriceLevel[]; asks: WsApiPriceLevel[] };
+  data: { bids: WsApiPriceLevel[]; asks: WsApiPriceLevel[] };
 };
 
 type WsRecentTrade = {
   type: "recent_trade" | "trade_executed";
-  data: { symbol: string; price: string; amount: string };
+  data: { price: string; amount: string };
 };
 
 type WsApiMessage = WsOrderbookUpdate | WsRecentTrade;
@@ -102,11 +101,8 @@ function createOrderBookStore() {
   }
 
   function handleMessage(msg: WsApiMessage) {
-    const currentMarket = get(selectedMarket);
-
     // orderbook_update: full depth snapshot after any book mutation
     if (msg.type === "orderbook_update") {
-      if (msg.data.symbol !== currentMarket) return;
       update(state => ({
         ...state,
         bids: msg.data.bids.map(b => ({ price: parseFloat(b.price), amount: parseFloat(b.amount) })),
@@ -117,7 +113,6 @@ function createOrderBookStore() {
 
     // recent_trade: single fill event
     if (msg.type === "recent_trade" || msg.type === "trade_executed") {
-      if (msg.data.symbol !== currentMarket) return;
       const trade: Trade = {
         price:  parseFloat(msg.data.price),
         amount: parseFloat(msg.data.amount),
@@ -147,8 +142,8 @@ function createOrderBookStore() {
     subscribe,
     connect,
     disconnect,
-    clear: () => set(EMPTY_STATE),
   };
 }
 
 export const orderBook = createOrderBookStore();
+

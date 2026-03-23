@@ -2,6 +2,7 @@
     import { createChart, ColorType, type IChartApi, type CandlestickSeriesPartialOptions, type HistogramSeriesPartialOptions, type UTCTimestamp, type ISeriesApi } from 'lightweight-charts';
     import { onMount, onDestroy } from 'svelte';
     import { fetchCandles } from '../../lib/api/client';
+    let { market = "BTC_USDT" } = $props<{ market?: string }>();
     import { orderBook } from '../../stores/orderBookStore';
 
     // Props structure for OHLCV data
@@ -85,7 +86,7 @@
 
         // 5. Fetch historical candles from DB
         try {
-            const apiCandles = await fetchCandles("BTC_USDT", "1m", 100);
+            const apiCandles = await fetchCandles(market, "1m", 100);
             
             // Map and sort chronologically (oldest first required by lightweight-charts)
             const historicalData: CandleData[] = apiCandles

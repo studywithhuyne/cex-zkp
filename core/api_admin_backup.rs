@@ -1,4 +1,4 @@
-use axum::{
+﻿use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Json,
@@ -92,12 +92,6 @@ pub struct AdminAssetDto {
     pub is_active: bool,
 }
 
-#[derive(serde::Deserialize)]
-pub struct AddAssetReq {
-    pub symbol: String,
-    pub name: String,
-}
-
 pub async fn get_assets_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AdminAssetDto>>, (StatusCode, String)> {
@@ -116,37 +110,6 @@ pub async fn get_assets_handler(
     }).collect();
 
     Ok(Json(assets))
-}
-
-pub async fn add_asset_handler(
-    State(state): State<AppState>,
-    Json(req): Json<AddAssetReq>,
-) -> Result<Json<()>, (StatusCode, String)> {
-    let symbol = req.symbol.to_uppercase();
-    let name = req.name.clone();
-    
-    // Insert into assets table
-    sqlx::query(
-        "INSERT INTO assets (symbol, name, decimals, is_active) VALUES ($1, $2, 8, true)"
-    )
-    .bind(&symbol)
-    .bind(&name)
-    .execute(&state.db)
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    // Create a default market against USDT if needed
-    if symbol != "USDT" {
-        sqlx::query(
-            "INSERT INTO markets (base_asset, quote_asset, price_decimals, quantity_decimals, min_order_size, max_order_size, is_active) VALUES ($1, 'USDT', 2, 4, 1, 1000000, true) ON CONFLICT DO NOTHING"
-        )
-        .bind(&symbol)
-        .execute(&state.db)
-        .await
-        .ok();
-    }
-
-    Ok(Json(()))
 }
 
 #[derive(Deserialize)]
