@@ -1,8 +1,8 @@
 import { writable } from "svelte/store";
 
-export type Route = "/" | "/login" | "/trade" | "/wallet" | "/zk-verify" | "/testing";
+export type Route = "/" | "/login" | "/trade" | "/wallet" | "/zk-verify" | "/testing" | "/admin" | "/admin/login";
 
-const VALID_ROUTES: Route[] = ["/", "/login", "/trade", "/wallet", "/zk-verify", "/testing"];
+const VALID_ROUTES: Route[] = ["/", "/login", "/trade", "/wallet", "/zk-verify", "/testing", "/admin", "/admin/login"];
 const DEFAULT_ROUTE: Route = "/";
 
 function parseHash(): Route {

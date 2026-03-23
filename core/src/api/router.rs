@@ -11,12 +11,12 @@
 
 use axum::{
     http::StatusCode,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde_json::{json, Value};
 
-use super::{auth, data, metrics, orders, wallet, ws, zkp, state::AppState};
+use super::{admin, auth, data, metrics, orders, wallet, ws, zkp, state::AppState};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public factory
@@ -55,6 +55,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/zkp/solvency", get(zkp::solvency_handler))
         // API-05: real-time WebSocket feed
         .route("/ws", get(ws::ws_handler))
+        // Admin Panel Endpoints
+        .route("/api/admin/metrics", get(admin::admin_metrics_handler))
+        .route("/api/admin/treasury", get(admin::admin_treasury_handler))
+        .route("/api/admin/assets", get(admin::get_assets_handler))
+        // .route("/api/admin/assets", post(admin::add_asset_handler)) // if needed
+        .route("/api/admin/markets/halt", post(admin::halt_market_handler))
+        .route("/api/admin/users", get(admin::admin_users_handler))
+        .route("/api/admin/users/:id/suspend", put(admin::suspend_user_handler))
+        .route("/api/admin/zkp/snapshot", post(admin::trigger_zkp_snapshot_handler))
+        .route("/api/admin/zkp/history", get(admin::zkp_history_handler))
         .with_state(state)
 }
 

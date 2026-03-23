@@ -1,4 +1,5 @@
 // API module: Axum REST & WebSocket handlers
+pub mod admin;
 pub mod auth;
 pub mod data;
 pub mod metrics;
