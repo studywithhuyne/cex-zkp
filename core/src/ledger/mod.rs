@@ -171,6 +171,29 @@ impl InMemoryLedger {
         Ok(entry.free)
     }
 
+    pub fn withdraw(&mut self, user_id: u64, asset: &str, amount: Decimal) -> Result<Decimal, LedgerError> {
+        let key = (user_id, asset.to_string());
+        let entry = self
+            .balances
+            .entry(key)
+            .or_insert(BalanceState {
+                free: Decimal::ZERO,
+                locked: Decimal::ZERO,
+            });
+
+        if entry.free < amount {
+            return Err(LedgerError::InsufficientFreeBalance {
+                user_id,
+                asset: asset.to_string(),
+                required: amount,
+                available: entry.free,
+            });
+        }
+
+        entry.free -= amount;
+        Ok(entry.free)
+    }
+
     fn apply_fill_for_order(&mut self, order_id: u64, fill_qty: Decimal, exec_price: Decimal) -> Result<(), LedgerError> {
         let reservation = self
             .reservations
@@ -367,5 +390,40 @@ mod tests {
         assert_eq!(buyer_usdt.locked, dec!(0));
         assert_eq!(buyer_usdt.free, dec!(905));
         assert_eq!(buyer_btc.free, dec!(1));
+    }
+
+    #[test]
+    fn withdraw_decreases_free_balance() {
+        let rows = vec![(1_i64, "USDT".to_string(), dec!(1000), dec!(0))];
+        let mut ledger = InMemoryLedger::from_rows(&rows).unwrap();
+
+        let new_available = ledger.withdraw(1, "USDT", dec!(250)).unwrap();
+        assert_eq!(new_available, dec!(750));
+
+        let usdt = ledger
+            .balances_for_user(1)
+            .into_iter()
+            .find(|b| b.asset == "USDT")
+            .unwrap();
+
+        assert_eq!(usdt.free, dec!(750));
+        assert_eq!(usdt.locked, dec!(0));
+    }
+
+    #[test]
+    fn withdraw_rejects_when_amount_exceeds_free_balance() {
+        let rows = vec![(1_i64, "USDT".to_string(), dec!(100), dec!(0))];
+        let mut ledger = InMemoryLedger::from_rows(&rows).unwrap();
+
+        let err = ledger.withdraw(1, "USDT", dec!(150)).unwrap_err();
+        assert!(matches!(
+            err,
+            LedgerError::InsufficientFreeBalance {
+                user_id: 1,
+                ref asset,
+                required,
+                available,
+            } if asset == "USDT" && required == dec!(150) && available == dec!(100)
+        ));
     }
 }

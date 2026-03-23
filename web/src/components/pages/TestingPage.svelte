@@ -1,6 +1,5 @@
 <script lang="ts">
   import SimulatorPanel from "../simulator/SimulatorPanel.svelte";
-  import MockDepositForm from "../wallet/MockDepositForm.svelte";
   import ExchangeFundsForm from "../testing/ExchangeFundsForm.svelte";
 </script>
 
@@ -22,8 +21,5 @@
 <div class="grid gap-4 lg:grid-cols-2 lg:items-start md:gap-6">
   <SimulatorPanel />
 
-  <div class="flex flex-col gap-4 md:gap-6">
-    <MockDepositForm />
-    <ExchangeFundsForm />
-  </div>
+  <ExchangeFundsForm />
 </div>

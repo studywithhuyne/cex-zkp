@@ -20,6 +20,8 @@ use crate::ledger::{InMemoryLedger, LedgerError};
 
 use super::ws::{WsEvent, BROADCAST_CAPACITY};
 
+const EXCHANGE_BASE_CAPITAL_USDT: u64 = 500_000_000;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AppState
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +50,10 @@ pub struct AppState {
     /// In-memory wallet ledger (free/locked balances + order reservations).
     pub ledger: Arc<Mutex<InMemoryLedger>>,
 
+    /// Internal exchange totals, kept for future admin views only.
+    /// Not exposed in user wallet APIs.
+    pub exchange_funds: Arc<Mutex<ExchangeFunds>>,
+
     /// Last executed trade price per symbol. Used as a stable anchor for
     /// order price-band checks to reduce quote-spam market skew.
     pub last_trade_price: Arc<Mutex<HashMap<String, Decimal>>>,
@@ -74,6 +80,8 @@ impl AppState {
                 sqlx::Error::Protocol("invalid balances snapshot for in-memory ledger".to_string())
             }
         })?;
+        let total_user_usdt = load_total_user_usdt(&db).await?;
+        let exchange_funds = ExchangeFunds::new(Decimal::from(EXCHANGE_BASE_CAPITAL_USDT), total_user_usdt);
 
         Ok(Self {
             engine:        Arc::new(RwLock::new(Engine::new())),
@@ -82,6 +90,7 @@ impl AppState {
             events,
             order_users:   Arc::new(Mutex::new(HashMap::new())),
             ledger:        Arc::new(Mutex::new(ledger)),
+            exchange_funds: Arc::new(Mutex::new(exchange_funds)),
             last_trade_price: Arc::new(Mutex::new(HashMap::new())),
             broadcast:     broadcast_tx,
             metrics,
@@ -122,6 +131,33 @@ impl AppState {
     pub fn get_last_trade_price(&self, symbol: &str) -> Option<Decimal> {
         self.last_trade_price.lock().get(symbol).copied()
     }
+
+    #[inline]
+    pub fn adjust_exchange_user_usdt(&self, delta: Decimal) {
+        self.exchange_funds.lock().apply_user_delta(delta);
+    }
+}
+
+#[derive(Debug)]
+pub struct ExchangeFunds {
+    pub base_capital_usdt: Decimal,
+    pub total_user_usdt: Decimal,
+    pub total_exchange_usdt: Decimal,
+}
+
+impl ExchangeFunds {
+    fn new(base_capital_usdt: Decimal, total_user_usdt: Decimal) -> Self {
+        Self {
+            base_capital_usdt,
+            total_user_usdt,
+            total_exchange_usdt: base_capital_usdt + total_user_usdt,
+        }
+    }
+
+    fn apply_user_delta(&mut self, delta: Decimal) {
+        self.total_user_usdt += delta;
+        self.total_exchange_usdt = self.base_capital_usdt + self.total_user_usdt;
+    }
 }
 
 #[derive(Debug)]
@@ -143,4 +179,16 @@ async fn bootstrap_ledger(db: &PgPool) -> Result<InMemoryLedger, BootstrapLedger
         LedgerError::InvalidUserId => BootstrapLedgerError::InvalidSnapshot,
         _ => BootstrapLedgerError::InvalidSnapshot,
     })
+}
+
+async fn load_total_user_usdt(db: &PgPool) -> Result<Decimal, sqlx::Error> {
+    let row: (Decimal,) = sqlx::query_as(
+        "SELECT COALESCE(SUM(available + locked), 0)::numeric
+         FROM balances
+         WHERE asset_symbol = 'USDT'",
+    )
+    .fetch_one(db)
+    .await?;
+
+    Ok(row.0)
 }

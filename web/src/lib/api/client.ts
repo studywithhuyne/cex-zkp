@@ -112,6 +112,12 @@ export type DepositResponse = {
   new_available: string;
 };
 
+export type WithdrawResponse = {
+  asset: string;
+  withdrawn: string;
+  new_available: string;
+};
+
 export type AuthResponse = {
   user_id: string;
   username: string;
@@ -167,6 +173,9 @@ export const fetchCandles = (symbol: string, interval = "1d", limit = 1) =>
 
 export const postDeposit = (userId: AuthUserId, asset: string, amount: string) =>
   apiPost<DepositResponse>("/api/deposit", { asset, amount }, userId);
+
+export const postWithdraw = (userId: AuthUserId, asset: string, amount: string) =>
+  apiPost<WithdrawResponse>("/api/withdraw", { asset, amount }, userId);
 
 export const cancelOrder = (userId: AuthUserId, orderId: number) =>
   apiDelete(`/api/orders/${orderId}`, userId);
