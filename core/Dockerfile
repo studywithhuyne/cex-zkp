@@ -3,8 +3,8 @@ WORKDIR /app
 
 # ── 1. Cache external dependencies ───────────────────────────────────────────
 # Copy only manifests first — this layer is only invalidated when
-# Cargo.toml / Cargo.lock changes, not on every source edit.
-COPY Cargo.toml Cargo.lock ./
+# Cargo.toml changes, not on every source edit.
+COPY Cargo.toml ./
 COPY core/Cargo.toml core/Cargo.toml
 COPY zkp/Cargo.toml zkp/Cargo.toml
 
@@ -24,7 +24,7 @@ COPY core core
 COPY zkp zkp
 # touch forces cargo to see source files as newer than the dummy build artifacts.
 RUN touch core/src/main.rs core/src/lib.rs zkp/src/lib.rs && \
-    cargo build -p core --release --locked
+    cargo build -p core --release
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
