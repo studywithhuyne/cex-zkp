@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, str::FromStr, time::{Duration, Instant}};
 
 use axum::{
     extract::State,
@@ -20,6 +20,8 @@ const PAIRS: [(&str, &str, &str, i64); 4] = [
 ];
 
 const ORDER_ENDPOINT: &str = "http://127.0.0.1:3000/api/orders";
+const LIVE_TICKERS_ENDPOINT: &str = "http://127.0.0.1:3000/api/market/tickers/live?symbols=BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT";
+const ANCHOR_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy)]
 struct ProfileConfig {
@@ -89,6 +91,12 @@ struct PlaceOrderApiResponse {
     trades_count: usize,
 }
 
+#[derive(Deserialize)]
+struct LiveTickerApiResponse {
+    symbol: String,
+    last_price: String,
+}
+
 #[derive(Serialize)]
 pub struct SimulatorActionResponse {
     pub ok: bool,
@@ -99,6 +107,8 @@ pub struct SimulatorActionResponse {
 pub fn spawn_simulator_worker(state: AppState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let client = reqwest::Client::new();
+        let mut api_anchors: HashMap<String, Decimal> = HashMap::new();
+        let mut last_anchor_refresh = Instant::now() - ANCHOR_REFRESH_INTERVAL;
 
         loop {
             let (running, profile) = {
@@ -111,8 +121,23 @@ pub fn spawn_simulator_worker(state: AppState) -> tokio::task::JoinHandle<()> {
                 continue;
             }
 
+            if last_anchor_refresh.elapsed() >= ANCHOR_REFRESH_INTERVAL {
+                match fetch_live_anchors(&client).await {
+                    Ok(anchors) if !anchors.is_empty() => {
+                        api_anchors = anchors;
+                    }
+                    Ok(_) => {
+                        tracing::warn!("simulator live ticker API returned no anchors");
+                    }
+                    Err(err) => {
+                        tracing::warn!("simulator failed to fetch live ticker anchors: {err}");
+                    }
+                }
+                last_anchor_refresh = Instant::now();
+            }
+
             let config = profile_config(profile);
-            if let Err(err) = run_one_tick(&state, &client, config).await {
+            if let Err(err) = run_one_tick(&state, &client, config, &api_anchors).await {
                 tracing::warn!("simulator tick failed: {err}");
             }
 
@@ -125,14 +150,17 @@ async fn run_one_tick(
     state: &AppState,
     client: &reqwest::Client,
     config: ProfileConfig,
+    api_anchors: &HashMap<String, Decimal>,
 ) -> Result<(), String> {
     let mut orders_delta = 0_u64;
     let mut fills_delta = 0_u64;
     let mut per_pair_delta: HashMap<String, SimulatorPairStats> = HashMap::new();
 
     for (pair, base, quote, fallback_anchor) in PAIRS {
-        let anchor = state
-            .get_last_trade_price(pair)
+        let anchor = api_anchors
+            .get(pair)
+            .copied()
+            .or_else(|| state.get_last_trade_price(pair))
             .unwrap_or_else(|| Decimal::from(fallback_anchor));
 
         for _ in 0..config.orders_per_pair_per_tick {
@@ -217,6 +245,51 @@ async fn run_one_tick(
     }
 
     Ok(())
+}
+
+async fn fetch_live_anchors(client: &reqwest::Client) -> Result<HashMap<String, Decimal>, String> {
+    let response = client
+        .get(LIVE_TICKERS_ENDPOINT)
+        .send()
+        .await
+        .map_err(|e| format!("live ticker request failed: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("live ticker endpoint returned status {}", response.status()));
+    }
+
+    let tickers = response
+        .json::<Vec<LiveTickerApiResponse>>()
+        .await
+        .map_err(|e| format!("invalid live ticker response: {e}"))?;
+
+    let mut out = HashMap::new();
+    for ticker in tickers {
+        let pair = ticker_symbol_to_pair(&ticker.symbol);
+        let Some(pair_symbol) = pair else {
+            continue;
+        };
+
+        let Ok(last_price) = Decimal::from_str(ticker.last_price.trim()) else {
+            continue;
+        };
+
+        if !last_price.is_sign_negative() && !last_price.is_zero() {
+            out.insert(pair_symbol.to_string(), last_price);
+        }
+    }
+
+    Ok(out)
+}
+
+fn ticker_symbol_to_pair(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "BTCUSDT" => Some("BTC_USDT"),
+        "ETHUSDT" => Some("ETH_USDT"),
+        "SOLUSDT" => Some("SOL_USDT"),
+        "BNBUSDT" => Some("BNB_USDT"),
+        _ => None,
+    }
 }
 
 pub async fn simulator_status_handler(
