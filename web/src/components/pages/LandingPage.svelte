@@ -213,7 +213,18 @@
               <tr class="group transition-colors hover:bg-slate-800/30">
                 <td class="py-4 pl-4">
                   <div class="flex items-center gap-3">
-                    <img src={row.iconUrl} alt={`${row.symbol} icon`} class="h-8 w-8 rounded-full ring-1 ring-slate-700 bg-slate-800 p-1" loading="lazy" />
+                    <img
+                      src={row.iconUrl}
+                      alt={`${row.symbol} icon`}
+                      class="h-8 w-8 rounded-full ring-1 ring-slate-700 bg-slate-800 p-1"
+                      loading="lazy"
+                      onerror={(event) => {
+                        const target = event.currentTarget as HTMLImageElement;
+                        if (!target.src.endsWith('/icons/coins/default.svg')) {
+                          target.src = '/icons/coins/default.svg';
+                        }
+                      }}
+                    />
                     <span class="mono text-sm font-bold text-slate-100">{row.symbol.replace('_', '/')}</span>
                   </div>
                 </td>

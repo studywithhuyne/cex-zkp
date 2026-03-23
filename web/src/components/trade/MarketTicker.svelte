@@ -61,8 +61,14 @@
       <img
         src={asset.iconUrl}
         alt={`${asset.symbol} icon`}
-        class="h-4 w-4 rounded-full"
+        class="h-4 w-4 rounded-full bg-slate-800 ring-1 ring-slate-600/60"
         loading="lazy"
+        onerror={(event) => {
+          const target = event.currentTarget as HTMLImageElement;
+          if (!target.src.endsWith('/icons/coins/default.svg')) {
+            target.src = '/icons/coins/default.svg';
+          }
+        }}
       />
       <span class="text-slate-300 font-bold">{asset.symbol}/USDT</span>
       {#if tickers[asset.symbol]}

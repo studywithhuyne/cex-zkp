@@ -8,22 +8,22 @@ export const SUPPORTED_MARKET_ASSETS: MarketAsset[] = [
   {
     symbol: "BTC",
     pair: "BTC_USDT",
-    iconUrl: "https://cryptoicons.org/api/icon/btc/32",
+    iconUrl: "/icons/coins/btc.svg",
   },
   {
     symbol: "ETH",
     pair: "ETH_USDT",
-    iconUrl: "https://cryptoicons.org/api/icon/eth/32",
+    iconUrl: "/icons/coins/eth.svg",
   },
   {
     symbol: "SOL",
     pair: "SOL_USDT",
-    iconUrl: "https://cryptoicons.org/api/icon/sol/32",
+    iconUrl: "/icons/coins/sol.svg",
   },
   {
     symbol: "BNB",
     pair: "BNB_USDT",
-    iconUrl: "https://cryptoicons.org/api/icon/bnb/32",
+    iconUrl: "/icons/coins/bnb.svg",
   },
 ];
 

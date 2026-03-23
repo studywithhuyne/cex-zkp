@@ -373,7 +373,7 @@
                     <img
                       src={iconPath(asset.symbol)}
                       alt={asset.symbol}
-                      class="h-4 w-4 rounded-full object-cover"
+                      class="h-5 w-5 rounded-full object-cover bg-slate-800 ring-1 ring-slate-600/60"
                       loading="lazy"
                       onerror={(event) => {
                         const target = event.currentTarget as HTMLImageElement;

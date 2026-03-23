@@ -1,5 +1,5 @@
 ﻿<script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { router } from "../../stores/routerStore";
   import { logoutAdmin } from "../../stores/adminAuthStore";
   import {
@@ -40,6 +40,24 @@
 
   // Notifications
   let message = $state<string | null>(null);
+  const DASHBOARD_REFRESH_MS = 2000;
+  let dashboardRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+  function stopDashboardRefresh() {
+    if (dashboardRefreshTimer) {
+      clearInterval(dashboardRefreshTimer);
+      dashboardRefreshTimer = null;
+    }
+  }
+
+  function startDashboardRefresh() {
+    if (dashboardRefreshTimer) return;
+    dashboardRefreshTimer = setInterval(() => {
+      if (activeTab === "dashboard") {
+        void loadDashboard();
+      }
+    }, DASHBOARD_REFRESH_MS);
+  }
 
   async function loadDashboard() {
     try {
@@ -94,10 +112,20 @@
 
   onMount(() => {
     loadDashboard();
+    startDashboardRefresh();
+  });
+
+  onDestroy(() => {
+    stopDashboardRefresh();
   });
 
   $effect(() => {
-    if (activeTab === "dashboard") loadDashboard();
+    if (activeTab === "dashboard") {
+      loadDashboard();
+      startDashboardRefresh();
+    } else {
+      stopDashboardRefresh();
+    }
     if (activeTab === "assets") loadAssets();
     if (activeTab === "users") loadUsers();
     if (activeTab === "zkp") loadZkp();
