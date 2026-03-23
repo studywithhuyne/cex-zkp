@@ -4,7 +4,26 @@ import { selectedMarket } from "./marketStore";
 
 // WebSocket URL: dynamic so it works in both dev (Vite proxy on :5173) and Docker (Nginx on :8080).
 // Override via VITE_WS_URL env var if needed.
-const WS_URL = import.meta.env.VITE_WS_URL ?? `ws://${location.host}/ws`;
+function resolveWsUrl(): string {
+  const fromEnv = import.meta.env.VITE_WS_URL as string | undefined;
+  if (fromEnv && fromEnv.length > 0) {
+    if (fromEnv.startsWith("ws://") || fromEnv.startsWith("wss://")) {
+      return fromEnv;
+    }
+    if (fromEnv.startsWith("http://")) {
+      return `ws://${fromEnv.slice("http://".length)}`;
+    }
+    if (fromEnv.startsWith("https://")) {
+      return `wss://${fromEnv.slice("https://".length)}`;
+    }
+    return fromEnv;
+  }
+
+  const wsProtocol = location.protocol === "https:" ? "wss" : "ws";
+  return `${wsProtocol}://${location.host}/ws`;
+}
+
+const WS_URL = resolveWsUrl();
 
 type WsStatus = "idle" | "connecting" | "connected" | "disconnected";
 
@@ -85,6 +104,7 @@ function createOrderBookStore() {
     socket.onopen = () => {
       connectionState.update(s => ({ ...s, ws: "connected" as WsStatus }));
       console.log("WebSocket connected to", WS_URL);
+      void loadSnapshot(get(selectedMarket));
       if (reconnectTimer) {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;

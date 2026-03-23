@@ -30,6 +30,7 @@ use axum::{
 };
 use serde::Serialize;
 use tokio::sync::broadcast;
+use tokio::time::{self, Duration};
 
 use crate::api::state::AppState;
 
@@ -95,6 +96,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
     // Each call to `subscribe()` creates an independent Receiver with its own
     // read cursor; messages published before this point are not replayed.
     let mut rx: broadcast::Receiver<WsEvent> = state.broadcast.subscribe();
+    let mut keepalive = time::interval(Duration::from_secs(20));
 
     loop {
         tokio::select! {
@@ -143,6 +145,14 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                     // All other frames (text, binary) are silently ignored —
                     // this is a server-push-only feed.
                     _ => {}
+                }
+            }
+
+            // ── Server keepalive ping ────────────────────────────────────
+            // Keeps reverse proxies from closing idle WS connections.
+            _ = keepalive.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
+                    break;
                 }
             }
         }
