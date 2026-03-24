@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use super::state::{AppState, SimulatorPairStats, SimulatorProfile};
 
-const PAIRS: [(&str, &str, &str, i64); 4] = [
-    ("BTC_USDT", "BTC", "USDT", 65_000),
-    ("ETH_USDT", "ETH", "USDT", 3_000),
-    ("SOL_USDT", "SOL", "USDT", 100),
-    ("BNB_USDT", "BNB", "USDT", 600),
+const PAIRS: [(&str, &str, &str); 4] = [
+    ("BTC_USDT", "BTC", "USDT"),
+    ("ETH_USDT", "ETH", "USDT"),
+    ("SOL_USDT", "SOL", "USDT"),
+    ("BNB_USDT", "BNB", "USDT"),
 ];
 
 const ORDER_ENDPOINT: &str = "http://127.0.0.1:3000/api/orders";
@@ -110,6 +110,27 @@ pub fn spawn_simulator_worker(state: AppState) -> tokio::task::JoinHandle<()> {
         let mut api_anchors: HashMap<String, Decimal> = HashMap::new();
         let mut last_anchor_refresh = Instant::now() - ANCHOR_REFRESH_INTERVAL;
 
+        // On a cold start, try to prime anchors from live Binance tickers before
+        // generating any synthetic orders. This avoids static seed prices.
+        for _ in 0..10 {
+            match fetch_live_anchors(&client).await {
+                Ok(anchors) if !anchors.is_empty() => {
+                    for (pair, price) in &anchors {
+                        state.set_last_trade_price(pair.clone(), *price);
+                    }
+                    api_anchors = anchors;
+                    break;
+                }
+                Ok(_) => {
+                    tracing::warn!("simulator warm-up received empty live anchors");
+                }
+                Err(err) => {
+                    tracing::warn!("simulator warm-up failed to fetch live anchors: {err}");
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+
         loop {
             let (running, profile) = {
                 let sim = state.simulator.lock();
@@ -124,6 +145,9 @@ pub fn spawn_simulator_worker(state: AppState) -> tokio::task::JoinHandle<()> {
             if last_anchor_refresh.elapsed() >= ANCHOR_REFRESH_INTERVAL {
                 match fetch_live_anchors(&client).await {
                     Ok(anchors) if !anchors.is_empty() => {
+                        for (pair, price) in &anchors {
+                            state.set_last_trade_price(pair.clone(), *price);
+                        }
                         api_anchors = anchors;
                     }
                     Ok(_) => {
@@ -156,12 +180,13 @@ async fn run_one_tick(
     let mut fills_delta = 0_u64;
     let mut per_pair_delta: HashMap<String, SimulatorPairStats> = HashMap::new();
 
-    for (pair, base, quote, fallback_anchor) in PAIRS {
-        let anchor = api_anchors
+    for (pair, base, quote) in PAIRS {
+        let Some(anchor) = api_anchors
             .get(pair)
             .copied()
-            .or_else(|| state.get_last_trade_price(pair))
-            .unwrap_or_else(|| Decimal::from(fallback_anchor));
+            .or_else(|| state.get_last_trade_price(pair)) else {
+            continue;
+        };
 
         for _ in 0..config.orders_per_pair_per_tick {
             let is_buy = rand::thread_rng().gen_bool(0.5);

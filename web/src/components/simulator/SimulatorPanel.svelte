@@ -14,17 +14,17 @@
 
   type PairStats = {
     pair: string;
-    price: number;
+    price: number | null;
     changePct: number;
     orders: number;
     fills: number;
   };
 
   const INITIAL_PAIR_STATS: Record<string, PairStats> = {
-    BTC_USDT: { pair: "BTC_USDT", price: 65000, changePct: 0, orders: 0, fills: 0 },
-    ETH_USDT: { pair: "ETH_USDT", price: 3000, changePct: 0, orders: 0, fills: 0 },
-    SOL_USDT: { pair: "SOL_USDT", price: 100, changePct: 0, orders: 0, fills: 0 },
-    BNB_USDT: { pair: "BNB_USDT", price: 600, changePct: 0, orders: 0, fills: 0 },
+    BTC_USDT: { pair: "BTC_USDT", price: null, changePct: 0, orders: 0, fills: 0 },
+    ETH_USDT: { pair: "ETH_USDT", price: null, changePct: 0, orders: 0, fills: 0 },
+    SOL_USDT: { pair: "SOL_USDT", price: null, changePct: 0, orders: 0, fills: 0 },
+    BNB_USDT: { pair: "BNB_USDT", price: null, changePct: 0, orders: 0, fills: 0 },
   };
 
   const PAIRS = SUPPORTED_MARKET_ASSETS.map((m) => ({
@@ -61,6 +61,13 @@
     return min + Math.random() * (max - min);
   }
 
+  function formatPrice(value: number | null): string {
+    if (value === null || !Number.isFinite(value)) {
+      return "--";
+    }
+    return value.toFixed(2);
+  }
+
   function applyStatus(status: SimulatorStatus) {
     isRunning = status.running;
     profileKey = status.profile;
@@ -70,7 +77,7 @@
 
     const nextStats = { ...pairStats };
     for (const [pair, stats] of Object.entries(status.pair_stats)) {
-      const current = nextStats[pair] ?? INITIAL_PAIR_STATS[pair] ?? { pair, price: 0, changePct: 0, orders: 0, fills: 0 };
+      const current = nextStats[pair] ?? INITIAL_PAIR_STATS[pair] ?? { pair, price: null, changePct: 0, orders: 0, fills: 0 };
       nextStats[pair] = {
         ...current,
         orders: stats.orders,
@@ -186,7 +193,7 @@
       {@const stats = pairStats[m.pair] ?? INITIAL_PAIR_STATS[m.pair]!}
       <div class="rounded-lg border border-slate-800 bg-slate-900/60 py-2 px-2">
         <p class="text-[9px] uppercase tracking-widest text-slate-500">{m.pair.replace('_', '/')}</p>
-        <p class="mono text-sm font-semibold text-fuchsia-300">${stats.price.toFixed(2)}</p>
+        <p class="mono text-sm font-semibold text-fuchsia-300">${formatPrice(stats.price)}</p>
         <p class="mono text-[10px] {stats.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400'}">
           {stats.changePct >= 0 ? '+' : ''}{stats.changePct.toFixed(2)}%
         </p>
