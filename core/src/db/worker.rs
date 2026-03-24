@@ -81,6 +81,9 @@ const WORKER_BATCH_SIZE: usize = 256;
 
 /// Max time to coalesce events before flushing.
 const WORKER_BATCH_MAX_WAIT_MS: u64 = 10;
+/// Keep fee rates in sync with live settlement in api/orders.rs.
+const MAKER_FEE_RATE_MILLIS: i64 = 1;
+const TAKER_FEE_RATE_MILLIS: i64 = 2;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Worker loop
@@ -170,10 +173,14 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
                     pool,
                     buyer_id,
                     seller_id,
+                    *maker_user_id,
+                    *taker_user_id,
                     &base_asset,
                     &quote_asset,
                     trade.amount,
                     trade.price,
+                    Decimal::new(MAKER_FEE_RATE_MILLIS, 3),
+                    Decimal::new(TAKER_FEE_RATE_MILLIS, 3),
                 )
                 .await?;
             }
@@ -328,25 +335,45 @@ async fn mark_cancelled(pool: &PgPool, order_id: u64) -> Result<(), sqlx::Error>
 
 /// UPDATE balances for both sides of a completed trade.
 ///
-/// Buyer  receives `amount` of base_asset  (BTC) and spends `amount * price` of quote_asset (USDT).
-/// Seller receives `amount * price` USDT   and spends `amount` BTC.
+/// Buyer receives net base after fee, seller receives net quote after fee.
+/// Fee is deducted from the received asset side.
 async fn update_balances(
     pool:           &PgPool,
     buyer_user_id:  u64,
     seller_user_id: u64,
+    maker_user_id:  u64,
+    taker_user_id:  u64,
     base_asset:     &str,    // e.g. "BTC"
     quote_asset:    &str,    // e.g. "USDT"
     amount:         Decimal, // BTC quantity traded
     price:          Decimal, // execution price
+    maker_fee_rate: Decimal,
+    taker_fee_rate: Decimal,
 ) -> Result<(), sqlx::Error> {
     let quote_amount = amount * price;
+    let buyer_fee_rate = if buyer_user_id == maker_user_id {
+        maker_fee_rate
+    } else if buyer_user_id == taker_user_id {
+        taker_fee_rate
+    } else {
+        Decimal::ZERO
+    };
+    let seller_fee_rate = if seller_user_id == maker_user_id {
+        maker_fee_rate
+    } else if seller_user_id == taker_user_id {
+        taker_fee_rate
+    } else {
+        Decimal::ZERO
+    };
+    let buyer_net_base = amount - (amount * buyer_fee_rate);
+    let seller_net_quote = quote_amount - (quote_amount * seller_fee_rate);
 
-    // Buyer gains BTC
+    // Buyer gains base (net of fee)
     sqlx::query(
         "UPDATE balances SET available = available + $1, updated_at = now()
          WHERE user_id = $2 AND asset_symbol = $3",
     )
-    .bind(amount)
+    .bind(buyer_net_base)
     .bind(buyer_user_id as i64)
     .bind(base_asset)
     .execute(pool)
@@ -374,12 +401,12 @@ async fn update_balances(
     .execute(pool)
     .await?;
 
-    // Seller gains USDT
+    // Seller gains quote (net of fee)
     sqlx::query(
         "UPDATE balances SET available = available + $1, updated_at = now()
          WHERE user_id = $2 AND asset_symbol = $3",
     )
-    .bind(quote_amount)
+    .bind(seller_net_quote)
     .bind(seller_user_id as i64)
     .bind(quote_asset)
     .execute(pool)
