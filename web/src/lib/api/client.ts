@@ -304,6 +304,12 @@ export type TreasuryMetrics = {
 export type AdminAssetDto = { symbol: string; name: string; decimals: number; is_active: boolean; };
 export type AdminUserDto = { user_id: number; username: string; is_suspended: boolean; };
 export type ZkSnapshotDto = { snapshot_id: string; root_hash: string; users_included: number; created_at: string; };
+export type AdminTreasuryAdjustResponse = {
+  ok: boolean;
+  action: "deposit" | "withdraw";
+  exchange_capital: string;
+  total_exchange_funds: string;
+};
 
 export const fetchAdminMetrics = () => apiGet<AdminMetrics>('/api/admin/metrics');
 export const fetchTreasuryMetrics = () => apiGet<TreasuryMetrics>('/api/admin/treasury');
@@ -314,4 +320,8 @@ export const fetchAdminUsers = () => apiGet<AdminUserDto[]>('/api/admin/users');
 export const suspendUser = (userId: number) => fetch('/api/admin/users/' + userId + '/suspend', { method: 'PUT' });
 export const triggerZkpSnapshot = () => apiPost('/api/admin/zkp/snapshot', {}, 1);
 export const fetchZkpHistory = () => apiGet<ZkSnapshotDto[]>('/api/admin/zkp/history');
+export const adminTreasuryDeposit = (amount: string) =>
+  apiPost<AdminTreasuryAdjustResponse>('/api/admin/treasury/deposit', { amount }, 1);
+export const adminTreasuryWithdraw = (amount: string) =>
+  apiPost<AdminTreasuryAdjustResponse>('/api/admin/treasury/withdraw', { amount }, 1);
 

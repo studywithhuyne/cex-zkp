@@ -141,6 +141,11 @@ impl AppState {
     pub fn adjust_exchange_user_usdt(&self, delta: Decimal) {
         self.exchange_funds.lock().apply_user_delta(delta);
     }
+
+    #[inline]
+    pub fn adjust_exchange_capital_usdt(&self, delta: Decimal) -> Result<(), &'static str> {
+        self.exchange_funds.lock().apply_capital_delta(delta)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,6 +261,17 @@ impl ExchangeFunds {
     fn apply_user_delta(&mut self, delta: Decimal) {
         self.total_user_usdt += delta;
         self.total_exchange_usdt = self.base_capital_usdt + self.total_user_usdt;
+    }
+
+    fn apply_capital_delta(&mut self, delta: Decimal) -> Result<(), &'static str> {
+        let next_capital = self.base_capital_usdt + delta;
+        if next_capital < Decimal::ZERO {
+            return Err("exchange capital cannot be negative");
+        }
+
+        self.base_capital_usdt = next_capital;
+        self.total_exchange_usdt = self.base_capital_usdt + self.total_user_usdt;
+        Ok(())
     }
 }
 

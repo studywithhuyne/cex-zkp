@@ -9,6 +9,8 @@
     addAsset,
     fetchAdminUsers,
     suspendUser,
+    adminTreasuryDeposit,
+    adminTreasuryWithdraw,
     haltMarket,
     triggerZkpSnapshot,
     fetchZkpHistory,
@@ -40,6 +42,8 @@
 
   // Notifications
   let message = $state<string | null>(null);
+  let treasuryAmount = $state("10000");
+  let treasuryPending = $state(false);
   const DASHBOARD_REFRESH_MS = 2000;
   let dashboardRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -166,6 +170,46 @@
       alert("Error: " + e.message);
     }
   }
+
+  async function handleTreasuryDeposit() {
+    const amount = treasuryAmount.trim();
+    if (!amount) {
+      alert("Please enter an amount.");
+      return;
+    }
+
+    treasuryPending = true;
+    try {
+      await adminTreasuryDeposit(amount);
+      await loadDashboard();
+      message = `Exchange capital deposited: ${amount} USDT`;
+      setTimeout(() => (message = null), 3000);
+    } catch (e: any) {
+      alert("Error: " + (e?.message ?? "deposit failed"));
+    } finally {
+      treasuryPending = false;
+    }
+  }
+
+  async function handleTreasuryWithdraw() {
+    const amount = treasuryAmount.trim();
+    if (!amount) {
+      alert("Please enter an amount.");
+      return;
+    }
+
+    treasuryPending = true;
+    try {
+      await adminTreasuryWithdraw(amount);
+      await loadDashboard();
+      message = `Exchange capital withdrawn: ${amount} USDT`;
+      setTimeout(() => (message = null), 3000);
+    } catch (e: any) {
+      alert("Error: " + (e?.message ?? "withdraw failed"));
+    } finally {
+      treasuryPending = false;
+    }
+  }
 </script>
 
 <div class="space-y-6 max-w-6xl mx-auto">
@@ -257,6 +301,32 @@
             <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded border border-slate-800/50">
               <span class="text-sm text-slate-400">Solvency Ratio</span>
               <span class="text-sm font-bold text-sky-400 mono">{parseFloat(treasury.solvency_ratio).toFixed(4)}</span>
+            </div>
+
+            <div class="mt-2 rounded border border-slate-800/50 bg-slate-900/40 p-3">
+              <p class="mb-2 text-[10px] uppercase tracking-widest text-slate-500">Exchange Capital Top-up / Withdraw</p>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  bind:value={treasuryAmount}
+                  placeholder="Amount in USDT"
+                  class="h-9 flex-1 rounded border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200 focus:border-sky-500 focus:outline-none"
+                />
+                <button
+                  class="h-9 rounded border border-emerald-500/40 bg-emerald-500/20 px-3 text-xs font-semibold uppercase tracking-wide text-emerald-300 disabled:opacity-60"
+                  onclick={handleTreasuryDeposit}
+                  disabled={treasuryPending}
+                >
+                  Deposit
+                </button>
+                <button
+                  class="h-9 rounded border border-rose-500/40 bg-rose-500/20 px-3 text-xs font-semibold uppercase tracking-wide text-rose-300 disabled:opacity-60"
+                  onclick={handleTreasuryWithdraw}
+                  disabled={treasuryPending}
+                >
+                  Withdraw
+                </button>
+              </div>
             </div>
           </div>
         {:else}

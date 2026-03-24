@@ -5,6 +5,7 @@ use axum::{
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 use super::state::AppState;
 
@@ -297,4 +298,63 @@ pub async fn zkp_history_handler(
     }).collect();
 
     Ok(Json(dtos))
+}
+
+#[derive(Deserialize)]
+pub struct TreasuryAdjustRequest {
+    pub amount: String,
+}
+
+#[derive(Serialize)]
+pub struct TreasuryAdjustResponse {
+    pub ok: bool,
+    pub action: String,
+    pub exchange_capital: String,
+    pub total_exchange_funds: String,
+}
+
+pub async fn admin_treasury_deposit_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<TreasuryAdjustRequest>,
+) -> Result<Json<TreasuryAdjustResponse>, (StatusCode, String)> {
+    let amount = Decimal::from_str(payload.amount.trim())
+        .map_err(|_| (StatusCode::BAD_REQUEST, "amount must be a valid decimal".to_string()))?;
+    if amount <= Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "amount must be > 0".to_string()));
+    }
+
+    state
+        .adjust_exchange_capital_usdt(amount)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let funds = state.exchange_funds.lock();
+    Ok(Json(TreasuryAdjustResponse {
+        ok: true,
+        action: "deposit".to_string(),
+        exchange_capital: funds.base_capital_usdt.to_string(),
+        total_exchange_funds: funds.total_exchange_usdt.to_string(),
+    }))
+}
+
+pub async fn admin_treasury_withdraw_handler(
+    State(state): State<AppState>,
+    Json(payload): Json<TreasuryAdjustRequest>,
+) -> Result<Json<TreasuryAdjustResponse>, (StatusCode, String)> {
+    let amount = Decimal::from_str(payload.amount.trim())
+        .map_err(|_| (StatusCode::BAD_REQUEST, "amount must be a valid decimal".to_string()))?;
+    if amount <= Decimal::ZERO {
+        return Err((StatusCode::BAD_REQUEST, "amount must be > 0".to_string()));
+    }
+
+    state
+        .adjust_exchange_capital_usdt(-amount)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let funds = state.exchange_funds.lock();
+    Ok(Json(TreasuryAdjustResponse {
+        ok: true,
+        action: "withdraw".to_string(),
+        exchange_capital: funds.base_capital_usdt.to_string(),
+        total_exchange_funds: funds.total_exchange_usdt.to_string(),
+    }))
 }

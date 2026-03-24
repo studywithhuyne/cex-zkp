@@ -85,6 +85,19 @@ const WORKER_BATCH_MAX_WAIT_MS: u64 = 10;
 const MAKER_FEE_RATE_MILLIS: i64 = 1;
 const TAKER_FEE_RATE_MILLIS: i64 = 2;
 
+struct BalanceUpdateInput<'a> {
+    buyer_user_id:  u64,
+    seller_user_id: u64,
+    maker_user_id:  u64,
+    taker_user_id:  u64,
+    base_asset:     &'a str,
+    quote_asset:    &'a str,
+    amount:         Decimal,
+    price:          Decimal,
+    maker_fee_rate: Decimal,
+    taker_fee_rate: Decimal,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Worker loop
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,19 +182,18 @@ async fn process_event(pool: &PgPool, event: &PersistenceEvent) -> Result<(), sq
                     Side::Buy => (*taker_user_id, *maker_user_id),
                     Side::Sell => (*maker_user_id, *taker_user_id),
                 };
-                update_balances(
-                    pool,
-                    buyer_id,
-                    seller_id,
-                    *maker_user_id,
-                    *taker_user_id,
-                    &base_asset,
-                    &quote_asset,
-                    trade.amount,
-                    trade.price,
-                    Decimal::new(MAKER_FEE_RATE_MILLIS, 3),
-                    Decimal::new(TAKER_FEE_RATE_MILLIS, 3),
-                )
+                update_balances(pool, BalanceUpdateInput {
+                    buyer_user_id: buyer_id,
+                    seller_user_id: seller_id,
+                    maker_user_id: *maker_user_id,
+                    taker_user_id: *taker_user_id,
+                    base_asset: &base_asset,
+                    quote_asset: &quote_asset,
+                    amount: trade.amount,
+                    price: trade.price,
+                    maker_fee_rate: Decimal::new(MAKER_FEE_RATE_MILLIS, 3),
+                    taker_fee_rate: Decimal::new(TAKER_FEE_RATE_MILLIS, 3),
+                })
                 .await?;
             }
 
@@ -339,33 +351,24 @@ async fn mark_cancelled(pool: &PgPool, order_id: u64) -> Result<(), sqlx::Error>
 /// Fee is deducted from the received asset side.
 async fn update_balances(
     pool:           &PgPool,
-    buyer_user_id:  u64,
-    seller_user_id: u64,
-    maker_user_id:  u64,
-    taker_user_id:  u64,
-    base_asset:     &str,    // e.g. "BTC"
-    quote_asset:    &str,    // e.g. "USDT"
-    amount:         Decimal, // BTC quantity traded
-    price:          Decimal, // execution price
-    maker_fee_rate: Decimal,
-    taker_fee_rate: Decimal,
+    input:          BalanceUpdateInput<'_>,
 ) -> Result<(), sqlx::Error> {
-    let quote_amount = amount * price;
-    let buyer_fee_rate = if buyer_user_id == maker_user_id {
-        maker_fee_rate
-    } else if buyer_user_id == taker_user_id {
-        taker_fee_rate
+    let quote_amount = input.amount * input.price;
+    let buyer_fee_rate = if input.buyer_user_id == input.maker_user_id {
+        input.maker_fee_rate
+    } else if input.buyer_user_id == input.taker_user_id {
+        input.taker_fee_rate
     } else {
         Decimal::ZERO
     };
-    let seller_fee_rate = if seller_user_id == maker_user_id {
-        maker_fee_rate
-    } else if seller_user_id == taker_user_id {
-        taker_fee_rate
+    let seller_fee_rate = if input.seller_user_id == input.maker_user_id {
+        input.maker_fee_rate
+    } else if input.seller_user_id == input.taker_user_id {
+        input.taker_fee_rate
     } else {
         Decimal::ZERO
     };
-    let buyer_net_base = amount - (amount * buyer_fee_rate);
+    let buyer_net_base = input.amount - (input.amount * buyer_fee_rate);
     let seller_net_quote = quote_amount - (quote_amount * seller_fee_rate);
 
     // Buyer gains base (net of fee)
@@ -374,8 +377,8 @@ async fn update_balances(
          WHERE user_id = $2 AND asset_symbol = $3",
     )
     .bind(buyer_net_base)
-    .bind(buyer_user_id as i64)
-    .bind(base_asset)
+    .bind(input.buyer_user_id as i64)
+    .bind(input.base_asset)
     .execute(pool)
     .await?;
 
@@ -385,8 +388,8 @@ async fn update_balances(
          WHERE user_id = $2 AND asset_symbol = $3",
     )
     .bind(quote_amount)
-    .bind(buyer_user_id as i64)
-    .bind(quote_asset)
+    .bind(input.buyer_user_id as i64)
+    .bind(input.quote_asset)
     .execute(pool)
     .await?;
 
@@ -395,9 +398,9 @@ async fn update_balances(
         "UPDATE balances SET available = available - $1, updated_at = now()
          WHERE user_id = $2 AND asset_symbol = $3",
     )
-    .bind(amount)
-    .bind(seller_user_id as i64)
-    .bind(base_asset)
+    .bind(input.amount)
+    .bind(input.seller_user_id as i64)
+    .bind(input.base_asset)
     .execute(pool)
     .await?;
 
@@ -407,8 +410,8 @@ async fn update_balances(
          WHERE user_id = $2 AND asset_symbol = $3",
     )
     .bind(seller_net_quote)
-    .bind(seller_user_id as i64)
-    .bind(quote_asset)
+    .bind(input.seller_user_id as i64)
+    .bind(input.quote_asset)
     .execute(pool)
     .await?;
 

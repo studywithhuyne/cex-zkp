@@ -68,6 +68,8 @@ pub fn build_router(state: AppState) -> Router {
         // Admin Panel Endpoints
         .route("/api/admin/metrics", get(admin::admin_metrics_handler))
         .route("/api/admin/treasury", get(admin::admin_treasury_handler))
+        .route("/api/admin/treasury/deposit", post(admin::admin_treasury_deposit_handler))
+        .route("/api/admin/treasury/withdraw", post(admin::admin_treasury_withdraw_handler))
         .route("/api/admin/assets", get(admin::get_assets_handler))
         .route("/api/admin/assets", post(admin::add_asset_handler))
         .route("/api/admin/markets/halt", post(admin::halt_market_handler))
