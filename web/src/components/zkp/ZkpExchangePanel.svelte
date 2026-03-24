@@ -11,6 +11,9 @@
     asset: string;
     snapshot_size: number;
     root_hash: string;
+    total_liabilities: string;
+    compared_assets: string;
+    assets_source: string;
     liabilities_leq_assets: boolean;
     verified_at: string;
   };
@@ -29,8 +32,14 @@
     errorMsg = "";
 
     try {
+      const params = new URLSearchParams({ asset: assetFilter });
+      const overrideAssets = $coldWalletAssets.trim();
+      if (overrideAssets.length > 0) {
+        params.set("cold_wallet_assets", overrideAssets);
+      }
+
       const res = await fetch(
-        `/api/zkp/solvency?asset=${encodeURIComponent(assetFilter)}&cold_wallet_assets=${encodeURIComponent($coldWalletAssets)}`,
+        `/api/zkp/solvency?${params.toString()}`,
         { headers: { "x-user-id": ($authState.userId ?? 1).toString() } }
       );
       if (!res.ok) {
@@ -133,6 +142,9 @@
         <p>Asset: <span class="mono text-slate-100">{result.asset}</span></p>
         <p>Root Hash: <span class="mono text-slate-100 break-all text-[10px]">{result.root_hash}</span></p>
         <p>Snapshot Size: <span class="mono text-slate-100">{result.snapshot_size} users</span></p>
+        <p>Total Liabilities: <span class="mono text-slate-100">{result.total_liabilities}</span></p>
+        <p>Compared Assets: <span class="mono text-slate-100">{result.compared_assets}</span></p>
+        <p>Assets Source: <span class="mono text-slate-100">{result.assets_source}</span></p>
         <p class="mt-1 font-semibold {result.liabilities_leq_assets ? 'text-emerald-300' : 'text-rose-300'}">
           Result: {result.liabilities_leq_assets ? 'PASS — Liabilities ≤ Assets' : 'FAIL — Liabilities > Assets'}
         </p>

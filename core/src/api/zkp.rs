@@ -64,6 +64,9 @@ pub struct ZkpSnarkDto {
 #[derive(Debug, Serialize)]
 pub struct ZkpSolvencyDto {
     pub liabilities_leq_assets: bool,
+    pub total_liabilities: String,
+    pub compared_assets: String,
+    pub assets_source: String,
     pub verified_at: String,
 }
 
@@ -140,9 +143,12 @@ pub async fn proof_handler(
         proof.leaf.balance,
     )?;
 
-    let solvency = resolve_cold_wallet_assets_optional(&asset, query.cold_wallet_assets.as_deref())?
-        .map(|cold_wallet_assets| ZkpSolvencyDto {
-            liabilities_leq_assets: proof.root.balance <= cold_wallet_assets,
+    let solvency = resolve_effective_assets_optional(&state, &asset, query.cold_wallet_assets.as_deref())?
+        .map(|resolved| ZkpSolvencyDto {
+            liabilities_leq_assets: proof.root.balance <= resolved.assets,
+            total_liabilities: proof.root.balance.to_string(),
+            compared_assets: resolved.assets.to_string(),
+            assets_source: resolved.source,
             verified_at: chrono::Utc::now().to_rfc3339(),
         });
 
@@ -200,39 +206,62 @@ fn get_or_create_snark_package(
     Ok(package)
 }
 
-fn resolve_cold_wallet_assets_optional(
+struct ResolvedAssets {
+    assets: Decimal,
+    source: String,
+}
+
+fn resolve_effective_assets_optional(
+    state: &AppState,
     asset: &str,
     query_value: Option<&str>,
-) -> Result<Option<Decimal>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Option<ResolvedAssets>, (StatusCode, Json<serde_json::Value>)> {
     if let Some(raw) = query_value.map(str::trim).filter(|s| !s.is_empty()) {
-        return parse_decimal(raw, "invalid query param cold_wallet_assets").map(Some);
+        return parse_decimal(raw, "invalid query param cold_wallet_assets").map(|value| {
+            Some(ResolvedAssets {
+                assets: value,
+                source: "query:cold_wallet_assets".to_string(),
+            })
+        });
     }
 
     let env_key = format!("COLD_WALLET_ASSETS_{}", asset);
     match std::env::var(&env_key) {
-        Ok(raw) => parse_decimal(raw.trim(), &format!("invalid env {env_key}")).map(Some),
-        Err(_) => Ok(None),
+        Ok(raw) => parse_decimal(raw.trim(), &format!("invalid env {env_key}")).map(|value| {
+            Some(ResolvedAssets {
+                assets: value,
+                source: format!("env:{env_key}"),
+            })
+        }),
+        Err(_) => {
+            if asset == "USDT" {
+                let base_capital = state.exchange_funds.lock().base_capital_usdt;
+                let exchange_revenue = state.ledger.lock().exchange_revenue_by_asset("USDT");
+                return Ok(Some(ResolvedAssets {
+                    assets: base_capital + exchange_revenue,
+                    source: "live:treasury_base_capital_plus_revenue".to_string(),
+                }));
+            }
+            Ok(None)
+        }
     }
 }
 
-fn resolve_cold_wallet_assets(
+fn resolve_effective_assets(
+    state: &AppState,
     asset: &str,
     query_value: Option<&str>,
-) -> Result<Decimal, (StatusCode, Json<serde_json::Value>)> {
-    if let Some(raw) = query_value.map(str::trim).filter(|s| !s.is_empty()) {
-        return parse_decimal(raw, "invalid query param cold_wallet_assets");
+) -> Result<ResolvedAssets, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(resolved) = resolve_effective_assets_optional(state, asset, query_value)? {
+        return Ok(resolved);
     }
 
     let env_key = format!("COLD_WALLET_ASSETS_{}", asset);
-    if let Ok(raw) = std::env::var(&env_key) {
-        return parse_decimal(raw.trim(), &format!("invalid env {env_key}"));
-    }
-
     Err((
         StatusCode::BAD_REQUEST,
         Json(serde_json::json!({
             "error": format!(
-                "missing cold wallet assets value; pass ?cold_wallet_assets=... or set env {}",
+                "missing solvency assets value for {asset}; pass ?cold_wallet_assets=... or set env {}",
                 env_key
             )
         })),
@@ -266,6 +295,9 @@ pub struct ZkpSolvencyResponse {
     pub asset: String,
     pub snapshot_size: usize,
     pub root_hash: String,
+    pub total_liabilities: String,
+    pub compared_assets: String,
+    pub assets_source: String,
     pub liabilities_leq_assets: bool,
     pub verified_at: String,
 }
@@ -312,9 +344,9 @@ pub async fn solvency_handler(
         .map_err(|e| internal_error_msg(&format!("failed to build solvency tree: {e}")))?;
 
     let root = tree.root();
-    let cold_wallet_assets = resolve_cold_wallet_assets(&asset, query.cold_wallet_assets.as_deref())?;
+    let resolved_assets = resolve_effective_assets(&state, &asset, query.cold_wallet_assets.as_deref())?;
     let total_liabilities = root.balance;
-    let liabilities_leq_assets = total_liabilities <= cold_wallet_assets;
+    let liabilities_leq_assets = total_liabilities <= resolved_assets.assets;
 
     let verified_at = chrono::Utc::now().to_rfc3339();
 
@@ -322,6 +354,9 @@ pub async fn solvency_handler(
         asset,
         snapshot_size: tree.original_leaf_count(),
         root_hash: hash_to_hex(&root.hash),
+        total_liabilities: total_liabilities.to_string(),
+        compared_assets: resolved_assets.assets.to_string(),
+        assets_source: resolved_assets.source,
         liabilities_leq_assets,
         verified_at,
     }))

@@ -93,7 +93,7 @@
       Exchange Funds Configuration
     </h2>
     <p class="mt-0.5 text-[10px] text-slate-500">
-      Configure the mocked cold wallet assets for exchange solvency verification
+      Optional: override cold wallet assets for solvency verification (leave empty to use live treasury)
     </p>
   </div>
 
@@ -103,7 +103,7 @@
       <input
         type="text"
         bind:value={$coldWalletAssets}
-        placeholder="e.g., 500000000"
+        placeholder="Optional override, e.g., 500000000"
         class="w-full rounded border border-slate-700/80 bg-slate-900/80 px-3 py-2 text-xs text-slate-200 outline-none focus:border-cyan-500/50"
       />
     </label>
