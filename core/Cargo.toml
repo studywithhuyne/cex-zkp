@@ -22,6 +22,7 @@ axum = { version = "0.7", features = ["ws"] }
 
 # Financial math - CRITICAL: never use f32/f64 for currency
 rust_decimal = { version = "1", features = ["serde-float"] }
+slotmap = "1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

@@ -1,7 +1,8 @@
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 
 use rust_decimal::Decimal;
+use slotmap::{DefaultKey, SlotMap};
 
 use super::error::EngineError;
 use super::types::{Order, Side, Trade};
@@ -9,25 +10,36 @@ use super::types::{Order, Side, Trade};
 pub type DepthLevel = (Decimal, Decimal);
 pub type DepthSnapshot = (Vec<DepthLevel>, Vec<DepthLevel>);
 
-/// Central limit order book.
-///
-/// Layout
-/// ──────
-/// bids  – buy  orders keyed by `Reverse<Decimal>` so the highest price
-///         comes first when iterating (BTreeMap is ascending by default).
-/// asks  – sell orders keyed by `Decimal`, lowest price first.
-///
-/// Each price level holds a `VecDeque<Order>` for FIFO matching:
-/// the front of the queue is always the oldest (highest-priority) order.
-///
-/// order_map – `order_id → (side, limit_price)` index for O(1) cancel lookup.
-///             Storing `Side` alongside price lets cancel_order route directly
-///             to the correct BTreeMap without scanning both sides.
+type OrderKey = DefaultKey;
+
+#[derive(Debug, Clone)]
+struct OrderNode {
+    order: Order,
+    side: Side,
+    price: Decimal,
+    prev: Option<OrderKey>,
+    next: Option<OrderKey>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct PriceLevel {
+    head: Option<OrderKey>,
+    tail: Option<OrderKey>,
+    len: usize,
+}
+
+impl PriceLevel {
+    fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
 pub struct OrderBook {
-    pub(super) bids: BTreeMap<Reverse<Decimal>, VecDeque<Order>>,
-    pub(super) asks: BTreeMap<Decimal, VecDeque<Order>>,
-    /// Maps order_id to (side, price) for fast cancel lookup.
-    pub(super) order_map: HashMap<u64, (Side, Decimal)>,
+    bids: BTreeMap<Reverse<Decimal>, PriceLevel>,
+    asks: BTreeMap<Decimal, PriceLevel>,
+    orders: SlotMap<OrderKey, OrderNode>,
+    /// Maps order_id to slot key for O(1) cancel lookup and unlink.
+    order_map: HashMap<u64, OrderKey>,
 }
 
 impl OrderBook {
@@ -35,6 +47,7 @@ impl OrderBook {
         Self {
             bids: BTreeMap::new(),
             asks: BTreeMap::new(),
+            orders: SlotMap::with_key(),
             order_map: HashMap::new(),
         }
     }
@@ -68,8 +81,8 @@ impl OrderBook {
             .bids
             .iter()
             .take(limit)
-            .map(|(Reverse(price), queue)| {
-                let total: Decimal = queue.iter().map(|o| o.remaining).sum();
+            .map(|(Reverse(price), level)| {
+                let total = self.level_total(*level);
                 (*price, total)
             })
             .collect();
@@ -78,8 +91,8 @@ impl OrderBook {
             .asks
             .iter()
             .take(limit)
-            .map(|(price, queue)| {
-                let total: Decimal = queue.iter().map(|o| o.remaining).sum();
+            .map(|(price, level)| {
+                let total = self.level_total(*level);
                 (*price, total)
             })
             .collect();
@@ -94,12 +107,12 @@ impl OrderBook {
     pub fn open_orders(&self) -> Vec<Order> {
         let mut out = Vec::with_capacity(self.order_map.len());
 
-        for queue in self.bids.values() {
-            out.extend(queue.iter().cloned());
+        for level in self.bids.values().copied() {
+            out.extend(self.orders_in_level(level));
         }
 
-        for queue in self.asks.values() {
-            out.extend(queue.iter().cloned());
+        for level in self.asks.values().copied() {
+            out.extend(self.orders_in_level(level));
         }
 
         out
@@ -132,28 +145,7 @@ impl OrderBook {
             return Err(EngineError::DuplicateOrderId(order.id));
         }
 
-        // --- Insert into the correct side ---
-        let price = order.price;
-        let id = order.id;
-        let side = order.side;
-
-        match side {
-            Side::Buy => {
-                self.bids
-                    .entry(Reverse(price))
-                    .or_default()
-                    .push_back(order);
-            }
-            Side::Sell => {
-                self.asks
-                    .entry(price)
-                    .or_default()
-                    .push_back(order);
-            }
-        }
-
-        // --- Register for fast cancel lookup ---
-        self.order_map.insert(id, (side, price));
+        self.insert_resting_order(order);
 
         Ok(())
     }
@@ -172,27 +164,14 @@ impl OrderBook {
     ///
     /// Complexity: O(log P + Q) where P = price levels, Q = queue depth.
     pub fn cancel_order(&mut self, order_id: u64) -> Result<Order, EngineError> {
-        // --- Lookup side and price — O(1) ---
-        let (side, price) = self
+        let key = self
             .order_map
-            .remove(&order_id)
+            .get(&order_id)
+            .copied()
             .ok_or(EngineError::OrderNotFound(order_id))?;
 
-        // --- Locate the price level and remove the order — O(log P + Q) ---
-        let cancelled = match side {
-            Side::Buy => Self::remove_from_level(&mut self.bids, Reverse(price), order_id),
-            Side::Sell => Self::remove_from_level(&mut self.asks, price, order_id),
-        };
-
-        // Invariant: order_map and BTreeMap must stay in sync.
-        // If the order was somehow missing from the BTreeMap despite being in
-        // order_map, that is a bug — panic in debug, silently ignore in release.
-        debug_assert!(
-            cancelled.is_some(),
-            "order {order_id} was in order_map but missing from the price level queue"
-        );
-
-        cancelled.ok_or(EngineError::OrderNotFound(order_id))
+        self.remove_order_key(key)
+            .ok_or(EngineError::OrderNotFound(order_id))
     }
 
     /// Match an incoming taker order against resting orders in the book.
@@ -236,14 +215,7 @@ impl OrderBook {
 
         // Taker still has remaining quantity → becomes a resting limit order.
         if !taker.is_filled() {
-            let price = taker.price;
-            let id = taker.id;
-            let side = taker.side;
-            match side {
-                Side::Buy => self.bids.entry(Reverse(price)).or_default().push_back(taker),
-                Side::Sell => self.asks.entry(price).or_default().push_back(taker),
-            }
-            self.order_map.insert(id, (side, price));
+            self.insert_resting_order(taker);
         }
 
         Ok(trades)
@@ -260,27 +232,31 @@ impl OrderBook {
                 _ => break,
             };
 
-            // STP: do not self-match. If the best maker is the same user,
-            // stop matching and rest the remaining taker quantity.
-            let best_is_self = self
+            let maker_key = self
                 .asks
                 .get(&best_ask)
-                .and_then(|queue| queue.front())
-                .map(|maker| maker.user_id == taker.user_id)
+                .and_then(|level| level.head)
+                .expect("ask level with missing head is invalid");
+
+            // STP: do not self-match.
+            let best_is_self = self
+                .orders
+                .get(maker_key)
+                .map(|maker| maker.order.user_id == taker.user_id)
                 .unwrap_or(false);
             if best_is_self {
                 break;
             }
 
-            // Inner scope so the mutable borrow of `self.asks` is released
-            // before we potentially remove the price level below.
             let (fill_qty, maker_id, maker_filled) = {
-                let queue = self.asks.get_mut(&best_ask).unwrap();
-                let maker = queue.front_mut().unwrap();
-                let fill_qty = taker.remaining.min(maker.remaining);
-                maker.remaining -= fill_qty;
+                let maker = self
+                    .orders
+                    .get_mut(maker_key)
+                    .expect("head key points to missing order");
+                let fill_qty = taker.remaining.min(maker.order.remaining);
+                maker.order.remaining -= fill_qty;
                 taker.remaining -= fill_qty;
-                (fill_qty, maker.id, maker.is_filled())
+                (fill_qty, maker.order.id, maker.order.is_filled())
             };
 
             trades.push(Trade {
@@ -292,12 +268,7 @@ impl OrderBook {
             });
 
             if maker_filled {
-                let queue = self.asks.get_mut(&best_ask).unwrap();
-                queue.pop_front();
-                if queue.is_empty() {
-                    self.asks.remove(&best_ask);
-                }
-                self.order_map.remove(&maker_id);
+                let _ = self.remove_order_key(maker_key);
             }
 
             if taker.is_filled() {
@@ -315,27 +286,31 @@ impl OrderBook {
                 _ => break,
             };
 
-            // STP: do not self-match. If the best maker is the same user,
-            // stop matching and rest the remaining taker quantity.
-            let best_is_self = self
+            let maker_key = self
                 .bids
                 .get(&Reverse(best_bid))
-                .and_then(|queue| queue.front())
-                .map(|maker| maker.user_id == taker.user_id)
+                .and_then(|level| level.head)
+                .expect("bid level with missing head is invalid");
+
+            // STP: do not self-match.
+            let best_is_self = self
+                .orders
+                .get(maker_key)
+                .map(|maker| maker.order.user_id == taker.user_id)
                 .unwrap_or(false);
             if best_is_self {
                 break;
             }
 
-            // Inner scope so the mutable borrow of `self.bids` is released
-            // before we potentially remove the price level below.
             let (fill_qty, maker_id, maker_filled) = {
-                let queue = self.bids.get_mut(&Reverse(best_bid)).unwrap();
-                let maker = queue.front_mut().unwrap();
-                let fill_qty = taker.remaining.min(maker.remaining);
-                maker.remaining -= fill_qty;
+                let maker = self
+                    .orders
+                    .get_mut(maker_key)
+                    .expect("head key points to missing order");
+                let fill_qty = taker.remaining.min(maker.order.remaining);
+                maker.order.remaining -= fill_qty;
                 taker.remaining -= fill_qty;
-                (fill_qty, maker.id, maker.is_filled())
+                (fill_qty, maker.order.id, maker.order.is_filled())
             };
 
             trades.push(Trade {
@@ -347,12 +322,7 @@ impl OrderBook {
             });
 
             if maker_filled {
-                let queue = self.bids.get_mut(&Reverse(best_bid)).unwrap();
-                queue.pop_front();
-                if queue.is_empty() {
-                    self.bids.remove(&Reverse(best_bid));
-                }
-                self.order_map.remove(&maker_id);
+                let _ = self.remove_order_key(maker_key);
             }
 
             if taker.is_filled() {
@@ -361,29 +331,152 @@ impl OrderBook {
         }
     }
 
-    /// Generic helper: remove `order_id` from the VecDeque at `key` in `map`.
-    /// Drops the price level entry if the queue becomes empty.
-    fn remove_from_level<K>(
-        map: &mut BTreeMap<K, VecDeque<Order>>,
-        key: K,
-        order_id: u64,
-    ) -> Option<Order>
-    where
-        K: Ord,
-    {
-        let queue = map.get_mut(&key)?;
+    fn insert_resting_order(&mut self, order: Order) {
+        let side = order.side;
+        let price = order.price;
+        let order_id = order.id;
 
-        // Find the order in the queue (O(Q)); position 0 is the common case
-        // for FIFO cancellations but we must handle any position.
-        let pos = queue.iter().position(|o| o.id == order_id)?;
-        let order = queue.remove(pos)?;
+        let key = self.orders.insert(OrderNode {
+            order,
+            side,
+            price,
+            prev: None,
+            next: None,
+        });
 
-        // Drop the price level if no orders remain to keep best_bid/best_ask clean.
-        if queue.is_empty() {
-            map.remove(&key);
+        let tail = match side {
+            Side::Buy => {
+                let level = self.bids.entry(Reverse(price)).or_default();
+                let tail = level.tail;
+                if level.head.is_none() {
+                    level.head = Some(key);
+                }
+                level.tail = Some(key);
+                level.len += 1;
+                tail
+            }
+            Side::Sell => {
+                let level = self.asks.entry(price).or_default();
+                let tail = level.tail;
+                if level.head.is_none() {
+                    level.head = Some(key);
+                }
+                level.tail = Some(key);
+                level.len += 1;
+                tail
+            }
+        };
+
+        if let Some(tail_key) = tail {
+            if let Some(tail_node) = self.orders.get_mut(tail_key) {
+                tail_node.next = Some(key);
+            }
+        }
+        if let Some(node) = self.orders.get_mut(key) {
+            node.prev = tail;
         }
 
-        Some(order)
+        self.order_map.insert(order_id, key);
+    }
+
+    fn remove_order_key(&mut self, key: OrderKey) -> Option<Order> {
+        let node = self.orders.get(key)?.clone();
+
+        if let Some(prev_key) = node.prev {
+            if let Some(prev) = self.orders.get_mut(prev_key) {
+                prev.next = node.next;
+            }
+        }
+        if let Some(next_key) = node.next {
+            if let Some(next) = self.orders.get_mut(next_key) {
+                next.prev = node.prev;
+            }
+        }
+
+        match node.side {
+            Side::Buy => {
+                let mut remove_level = false;
+                if let Some(level) = self.bids.get_mut(&Reverse(node.price)) {
+                    if level.head == Some(key) {
+                        level.head = node.next;
+                    }
+                    if level.tail == Some(key) {
+                        level.tail = node.prev;
+                    }
+                    level.len = level.len.saturating_sub(1);
+                    remove_level = level.is_empty();
+                }
+                if remove_level {
+                    self.bids.remove(&Reverse(node.price));
+                }
+            }
+            Side::Sell => {
+                let mut remove_level = false;
+                if let Some(level) = self.asks.get_mut(&node.price) {
+                    if level.head == Some(key) {
+                        level.head = node.next;
+                    }
+                    if level.tail == Some(key) {
+                        level.tail = node.prev;
+                    }
+                    level.len = level.len.saturating_sub(1);
+                    remove_level = level.is_empty();
+                }
+                if remove_level {
+                    self.asks.remove(&node.price);
+                }
+            }
+        }
+
+        self.order_map.remove(&node.order.id);
+        let removed = self.orders.remove(key)?;
+        Some(removed.order)
+    }
+
+    fn level_total(&self, level: PriceLevel) -> Decimal {
+        let mut total = Decimal::ZERO;
+        let mut cur = level.head;
+        while let Some(key) = cur {
+            if let Some(node) = self.orders.get(key) {
+                total += node.order.remaining;
+                cur = node.next;
+            } else {
+                break;
+            }
+        }
+        total
+    }
+
+    fn orders_in_level(&self, level: PriceLevel) -> Vec<Order> {
+        let mut out = Vec::with_capacity(level.len);
+        let mut cur = level.head;
+        while let Some(key) = cur {
+            if let Some(node) = self.orders.get(key) {
+                out.push(node.order.clone());
+                cur = node.next;
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    fn orders_at_price(&self, side: Side, price: Decimal) -> Vec<Order> {
+        match side {
+            Side::Buy => self
+                .bids
+                .get(&Reverse(price))
+                .copied()
+                .map(|l| self.orders_in_level(l))
+                .unwrap_or_default(),
+            Side::Sell => self
+                .asks
+                .get(&price)
+                .copied()
+                .map(|l| self.orders_in_level(l))
+                .unwrap_or_default(),
+        }
     }
 }
 
@@ -457,10 +550,10 @@ mod tests {
         let mut book = OrderBook::new();
         book.add_order(buy(1, dec!(100), dec!(5))).unwrap();
         book.add_order(buy(2, dec!(100), dec!(3))).unwrap();
-        let queue = book.bids.get(&Reverse(dec!(100))).unwrap();
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue.front().unwrap().id, 1);
-        assert_eq!(queue.back().unwrap().id, 2);
+        let orders = book.orders_at_price(Side::Buy, dec!(100));
+        assert_eq!(orders.len(), 2);
+        assert_eq!(orders.first().unwrap().id, 1);
+        assert_eq!(orders.last().unwrap().id, 2);
     }
 
     #[test]
@@ -530,10 +623,10 @@ mod tests {
         book.add_order(buy(2, dec!(100), dec!(2))).unwrap();
         book.add_order(buy(3, dec!(100), dec!(3))).unwrap();
         book.cancel_order(2).unwrap();
-        let queue = book.bids.get(&Reverse(dec!(100))).unwrap();
-        assert_eq!(queue.len(), 2);
-        assert_eq!(queue.front().unwrap().id, 1);
-        assert_eq!(queue.back().unwrap().id, 3);
+        let orders = book.orders_at_price(Side::Buy, dec!(100));
+        assert_eq!(orders.len(), 2);
+        assert_eq!(orders.first().unwrap().id, 1);
+        assert_eq!(orders.last().unwrap().id, 3);
         assert_eq!(book.len(), 2);
     }
 
@@ -652,8 +745,8 @@ mod tests {
         // Maker still alive with 7 remaining
         assert_eq!(book.len(), 1);
         assert_eq!(book.best_ask(), Some(dec!(100)));
-        let queue = book.asks.get(&dec!(100)).unwrap();
-        assert_eq!(queue.front().unwrap().remaining, dec!(7));
+        let orders = book.orders_at_price(Side::Sell, dec!(100));
+        assert_eq!(orders.first().unwrap().remaining, dec!(7));
     }
 
     // ─── match_order: walking the book ────────────────────────────────────
@@ -802,10 +895,10 @@ mod tests {
         assert_eq!(trades[2].amount, dec!(1));
 
         // C still resting at the front of the queue with 2 remaining
-        let queue = book.asks.get(&dec!(100)).unwrap();
-        assert_eq!(queue.len(), 1);
-        assert_eq!(queue.front().unwrap().id, 3);
-        assert_eq!(queue.front().unwrap().remaining, dec!(2));
+        let orders = book.orders_at_price(Side::Sell, dec!(100));
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders.first().unwrap().id, 3);
+        assert_eq!(orders.first().unwrap().remaining, dec!(2));
     }
 
     #[test]
@@ -828,8 +921,8 @@ mod tests {
         assert_eq!(trades[2].maker_order_id, 3);
         assert_eq!(trades[2].amount, dec!(1));
 
-        let queue = book.bids.get(&Reverse(dec!(100))).unwrap();
-        assert_eq!(queue.front().unwrap().remaining, dec!(2));
+        let orders = book.orders_at_price(Side::Buy, dec!(100));
+        assert_eq!(orders.first().unwrap().remaining, dec!(2));
     }
 
     // ─── ENG-07: full book exhaustion ─────────────────────────────────────
@@ -938,19 +1031,7 @@ mod proptest_suite {
 
     /// Sum the `remaining` field of every live order across both sides of the book.
     fn total_remaining_in_book(book: &OrderBook) -> Decimal {
-        let bid_rem: Decimal = book
-            .bids
-            .values()
-            .flat_map(|q| q.iter())
-            .map(|o| o.remaining)
-            .sum();
-        let ask_rem: Decimal = book
-            .asks
-            .values()
-            .flat_map(|q| q.iter())
-            .map(|o| o.remaining)
-            .sum();
-        bid_rem + ask_rem
+        book.open_orders().into_iter().map(|o| o.remaining).sum()
     }
 
     proptest! {
@@ -1014,8 +1095,7 @@ mod proptest_suite {
             );
 
             // Internal consistency: order_map must stay in sync with BTreeMap queues.
-            let queue_total: usize = book.bids.values().map(|q| q.len()).sum::<usize>()
-                + book.asks.values().map(|q| q.len()).sum::<usize>();
+            let queue_total = book.open_orders().len();
             prop_assert_eq!(
                 book.len(),
                 queue_total,
