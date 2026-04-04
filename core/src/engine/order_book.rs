@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Bound::{Excluded, Unbounded};
 
 use rust_decimal::Decimal;
 use slotmap::{DefaultKey, SlotMap};
@@ -25,7 +26,13 @@ struct OrderNode {
 struct PriceLevel {
     head: Option<OrderKey>,
     tail: Option<OrderKey>,
+    total_qty: Decimal,
     len: usize,
+    // Price-level linked list per side (best -> ... -> worst).
+    // For bids: prev=better(higher), next=worse(lower).
+    // For asks: prev=better(lower), next=worse(higher).
+    prev_price: Option<Decimal>,
+    next_price: Option<Decimal>,
 }
 
 impl PriceLevel {
@@ -40,6 +47,8 @@ pub struct OrderBook {
     orders: SlotMap<OrderKey, OrderNode>,
     /// Maps order_id to slot key for O(1) cancel lookup and unlink.
     order_map: HashMap<u64, OrderKey>,
+    best_bid_price: Option<Decimal>,
+    best_ask_price: Option<Decimal>,
 }
 
 impl OrderBook {
@@ -49,17 +58,19 @@ impl OrderBook {
             asks: BTreeMap::new(),
             orders: SlotMap::with_key(),
             order_map: HashMap::new(),
+            best_bid_price: None,
+            best_ask_price: None,
         }
     }
 
     /// Best (highest) bid price, or `None` if the book has no buy orders.
     pub fn best_bid(&self) -> Option<Decimal> {
-        self.bids.keys().next().map(|Reverse(p)| *p)
+        self.best_bid_price
     }
 
     /// Best (lowest) ask price, or `None` if the book has no sell orders.
     pub fn best_ask(&self) -> Option<Decimal> {
-        self.asks.keys().next().copied()
+        self.best_ask_price
     }
 
     /// Total number of live orders tracked by the order map.
@@ -81,20 +92,14 @@ impl OrderBook {
             .bids
             .iter()
             .take(limit)
-            .map(|(Reverse(price), level)| {
-                let total = self.level_total(*level);
-                (*price, total)
-            })
+            .map(|(Reverse(price), level)| (*price, level.total_qty))
             .collect();
 
         let asks = self
             .asks
             .iter()
             .take(limit)
-            .map(|(price, level)| {
-                let total = self.level_total(*level);
-                (*price, total)
-            })
+            .map(|(price, level)| (*price, level.total_qty))
             .collect();
 
         (bids, asks)
@@ -128,9 +133,9 @@ impl OrderBook {
     /// 1. Validate: price > 0 and amount > 0.
     /// 2. Reject duplicate order IDs (order_map lookup, O(1)).
     /// 3. Route to the correct side (bids / asks).
-    /// 4. Push the order to the back of the VecDeque at its price level,
+    /// 4. Push the order to the tail of the intrusive per-level linked list,
     ///    preserving FIFO priority within each level.
-    /// 5. Register order_id → (side, price) in order_map for O(1) cancel lookup.
+    /// 5. Register order_id → OrderKey in order_map for O(1) cancel lookup.
     ///
     /// Complexity: O(log P) where P = number of distinct price levels.
     pub fn add_order(&mut self, order: Order) -> Result<(), EngineError> {
@@ -154,15 +159,14 @@ impl OrderBook {
     ///
     /// Algorithm
     /// ─────────
-    /// 1. Lookup (side, price) from order_map — O(1).
+    /// 1. Lookup OrderKey from order_map — O(1).
     ///    If not found, return Err(OrderNotFound).
     /// 2. Remove from order_map.
-    /// 3. Navigate to the correct BTreeMap + price level — O(log P).
-    /// 4. Scan the VecDeque to find and remove the order by ID — O(Q).
-    /// 5. If the VecDeque is now empty, remove the price level from the
+    /// 3. Unlink node from intrusive per-level linked list — O(1).
+    /// 4. If the level is now empty, remove the price level from the
     ///    BTreeMap to reclaim memory and keep best_bid/best_ask accurate.
     ///
-    /// Complexity: O(log P + Q) where P = price levels, Q = queue depth.
+    /// Complexity: O(1) hot path, plus O(log P) only when level deletion happens.
     pub fn cancel_order(&mut self, order_id: u64) -> Result<Order, EngineError> {
         let key = self
             .order_map
@@ -227,7 +231,7 @@ impl OrderBook {
     fn fill_buy(&mut self, taker: &mut Order, trades: &mut Vec<Trade>) {
         loop {
             // Best ask must be ≤ taker price for a price crossing.
-            let best_ask = match self.asks.keys().next().copied() {
+            let best_ask = match self.best_ask_price {
                 Some(p) if p <= taker.price => p,
                 _ => break,
             };
@@ -259,6 +263,10 @@ impl OrderBook {
                 (fill_qty, maker.order.id, maker.order.is_filled())
             };
 
+            if let Some(level) = self.asks.get_mut(&best_ask) {
+                level.total_qty -= fill_qty;
+            }
+
             trades.push(Trade {
                 maker_order_id: maker_id,
                 taker_order_id: taker.id,
@@ -281,7 +289,7 @@ impl OrderBook {
     fn fill_sell(&mut self, taker: &mut Order, trades: &mut Vec<Trade>) {
         loop {
             // Best bid must be ≥ taker price for a price crossing.
-            let best_bid = match self.bids.keys().next().map(|Reverse(p)| *p) {
+            let best_bid = match self.best_bid_price {
                 Some(p) if p >= taker.price => p,
                 _ => break,
             };
@@ -313,6 +321,10 @@ impl OrderBook {
                 (fill_qty, maker.order.id, maker.order.is_filled())
             };
 
+            if let Some(level) = self.bids.get_mut(&Reverse(best_bid)) {
+                level.total_qty -= fill_qty;
+            }
+
             trades.push(Trade {
                 maker_order_id: maker_id,
                 taker_order_id: taker.id,
@@ -335,6 +347,20 @@ impl OrderBook {
         let side = order.side;
         let price = order.price;
         let order_id = order.id;
+        let remaining = order.remaining;
+
+        match side {
+            Side::Buy => {
+                if !self.bids.contains_key(&Reverse(price)) {
+                    self.insert_bid_level(price);
+                }
+            }
+            Side::Sell => {
+                if !self.asks.contains_key(&price) {
+                    self.insert_ask_level(price);
+                }
+            }
+        }
 
         let key = self.orders.insert(OrderNode {
             order,
@@ -346,23 +372,31 @@ impl OrderBook {
 
         let tail = match side {
             Side::Buy => {
-                let level = self.bids.entry(Reverse(price)).or_default();
+                let level = self
+                    .bids
+                    .get_mut(&Reverse(price))
+                    .expect("bid level must exist before append");
                 let tail = level.tail;
                 if level.head.is_none() {
                     level.head = Some(key);
                 }
                 level.tail = Some(key);
                 level.len += 1;
+                level.total_qty += remaining;
                 tail
             }
             Side::Sell => {
-                let level = self.asks.entry(price).or_default();
+                let level = self
+                    .asks
+                    .get_mut(&price)
+                    .expect("ask level must exist before append");
                 let tail = level.tail;
                 if level.head.is_none() {
                     level.head = Some(key);
                 }
                 level.tail = Some(key);
                 level.len += 1;
+                level.total_qty += remaining;
                 tail
             }
         };
@@ -403,11 +437,16 @@ impl OrderBook {
                     if level.tail == Some(key) {
                         level.tail = node.prev;
                     }
+                    if level.total_qty >= node.order.remaining {
+                        level.total_qty -= node.order.remaining;
+                    } else {
+                        level.total_qty = Decimal::ZERO;
+                    }
                     level.len = level.len.saturating_sub(1);
                     remove_level = level.is_empty();
                 }
                 if remove_level {
-                    self.bids.remove(&Reverse(node.price));
+                    self.remove_bid_level(node.price);
                 }
             }
             Side::Sell => {
@@ -419,11 +458,16 @@ impl OrderBook {
                     if level.tail == Some(key) {
                         level.tail = node.prev;
                     }
+                    if level.total_qty >= node.order.remaining {
+                        level.total_qty -= node.order.remaining;
+                    } else {
+                        level.total_qty = Decimal::ZERO;
+                    }
                     level.len = level.len.saturating_sub(1);
                     remove_level = level.is_empty();
                 }
                 if remove_level {
-                    self.asks.remove(&node.price);
+                    self.remove_ask_level(node.price);
                 }
             }
         }
@@ -431,20 +475,6 @@ impl OrderBook {
         self.order_map.remove(&node.order.id);
         let removed = self.orders.remove(key)?;
         Some(removed.order)
-    }
-
-    fn level_total(&self, level: PriceLevel) -> Decimal {
-        let mut total = Decimal::ZERO;
-        let mut cur = level.head;
-        while let Some(key) = cur {
-            if let Some(node) = self.orders.get(key) {
-                total += node.order.remaining;
-                cur = node.next;
-            } else {
-                break;
-            }
-        }
-        total
     }
 
     fn orders_in_level(&self, level: PriceLevel) -> Vec<Order> {
@@ -476,6 +506,128 @@ impl OrderBook {
                 .copied()
                 .map(|l| self.orders_in_level(l))
                 .unwrap_or_default(),
+        }
+    }
+
+    fn insert_bid_level(&mut self, price: Decimal) {
+        let better = self
+            .bids
+            .range(..Reverse(price))
+            .next_back()
+            .map(|(Reverse(p), _)| *p);
+        let worse = self
+            .bids
+            .range((Excluded(Reverse(price)), Unbounded))
+            .next()
+            .map(|(Reverse(p), _)| *p);
+
+        self.bids.insert(
+            Reverse(price),
+            PriceLevel {
+                head: None,
+                tail: None,
+                total_qty: Decimal::ZERO,
+                len: 0,
+                prev_price: better,
+                next_price: worse,
+            },
+        );
+
+        if let Some(better_price) = better {
+            if let Some(level) = self.bids.get_mut(&Reverse(better_price)) {
+                level.next_price = Some(price);
+            }
+        }
+        if let Some(worse_price) = worse {
+            if let Some(level) = self.bids.get_mut(&Reverse(worse_price)) {
+                level.prev_price = Some(price);
+            }
+        }
+
+        if self.best_bid_price.is_none() || self.best_bid_price.is_some_and(|p| price > p) {
+            self.best_bid_price = Some(price);
+        }
+    }
+
+    fn insert_ask_level(&mut self, price: Decimal) {
+        let better = self.asks.range(..price).next_back().map(|(p, _)| *p);
+        let worse = self
+            .asks
+            .range((Excluded(price), Unbounded))
+            .next()
+            .map(|(p, _)| *p);
+
+        self.asks.insert(
+            price,
+            PriceLevel {
+                head: None,
+                tail: None,
+                total_qty: Decimal::ZERO,
+                len: 0,
+                prev_price: better,
+                next_price: worse,
+            },
+        );
+
+        if let Some(better_price) = better {
+            if let Some(level) = self.asks.get_mut(&better_price) {
+                level.next_price = Some(price);
+            }
+        }
+        if let Some(worse_price) = worse {
+            if let Some(level) = self.asks.get_mut(&worse_price) {
+                level.prev_price = Some(price);
+            }
+        }
+
+        if self.best_ask_price.is_none() || self.best_ask_price.is_some_and(|p| price < p) {
+            self.best_ask_price = Some(price);
+        }
+    }
+
+    fn remove_bid_level(&mut self, price: Decimal) {
+        if let Some(level) = self.bids.remove(&Reverse(price)) {
+            if let Some(prev_price) = level.prev_price {
+                if let Some(prev) = self.bids.get_mut(&Reverse(prev_price)) {
+                    prev.next_price = level.next_price;
+                }
+            }
+            if let Some(next_price) = level.next_price {
+                if let Some(next) = self.bids.get_mut(&Reverse(next_price)) {
+                    next.prev_price = level.prev_price;
+                }
+            }
+
+            if self.best_bid_price == Some(price) {
+                self.best_bid_price = level.next_price;
+            }
+        }
+
+        if self.bids.is_empty() {
+            self.best_bid_price = None;
+        }
+    }
+
+    fn remove_ask_level(&mut self, price: Decimal) {
+        if let Some(level) = self.asks.remove(&price) {
+            if let Some(prev_price) = level.prev_price {
+                if let Some(prev) = self.asks.get_mut(&prev_price) {
+                    prev.next_price = level.next_price;
+                }
+            }
+            if let Some(next_price) = level.next_price {
+                if let Some(next) = self.asks.get_mut(&next_price) {
+                    next.prev_price = level.prev_price;
+                }
+            }
+
+            if self.best_ask_price == Some(price) {
+                self.best_ask_price = level.next_price;
+            }
+        }
+
+        if self.asks.is_empty() {
+            self.best_ask_price = None;
         }
     }
 }
