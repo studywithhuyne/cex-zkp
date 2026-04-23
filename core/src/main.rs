@@ -7,7 +7,7 @@ use matching_engine::observability::metrics as observability_metrics;
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
-    tracing::info!("Matching Engine starting...");
+    tracing::info!("Matching Engine starting..."); 
 
     let metrics_handle = observability_metrics::install_prometheus_recorder()
         .expect("Failed to initialise Prometheus recorder");

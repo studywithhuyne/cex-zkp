@@ -55,3 +55,4 @@ coverage/
 #local testing
 dummy_feed.rs
 /report/
+/.github/workflows/
