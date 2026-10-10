@@ -52,7 +52,12 @@ coverage/
 # cache
 .cache/
 
-#local testing
+# local testing
 dummy_feed.rs
 /report/
+
+# github
 /.github/workflows/
+
+# documents
+/docs
